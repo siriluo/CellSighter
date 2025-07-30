@@ -1,0 +1,39 @@
+data:
+  # Data directories
+  data_dir: "./data"
+  he_subdir: "H&E"  # Subdirectory for H&E images
+  mif_subdir: "mIF"  # Subdirectory for mIF images
+  
+  # Image processing parameters
+  patch_size: 256  # Size of image patches
+  overlap: 0.5     # Overlap between patches (0-1)
+  
+  # Augmentation parameters
+  augmentations:
+    random_crop: true
+    random_flip: true
+    random_rotation: true
+    color_jitter:
+      brightness: 0.2
+      contrast: 0.2
+      saturation: 0.2
+      hue: 0.1
+      
+  # Normalization parameters
+  normalization:
+    he:
+      mean: [0.485, 0.456, 0.406]  # RGB means for H&E normalization
+      std: [0.229, 0.224, 0.225]   # RGB standard deviations for H&E normalization
+    mif:
+      mean: [0.5, 0.5, 0.5]        # RGB means for mIF normalization
+      std: [0.5, 0.5, 0.5]         # RGB standard deviations for mIF normalization
+      
+  # Registration parameters
+  registration:
+    max_features: 1000    # Maximum number of features to detect
+    good_match_percent: 0.15  # Percentage of good matches to use
+    
+  # Data loading parameters
+  batch_size: 32
+  num_workers: 4
+  shuffle: true
