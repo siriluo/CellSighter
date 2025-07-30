@@ -26,12 +26,36 @@ This project is developed in collaboration with the National Center for Supercom
 
 ```
 CellSighter/
-├── data/           # Dataset storage (not tracked in git)
+├── datasets/
+│   └── CellTypes/
+│       ├── data/
+│       │   └── images/     # Raw images (HxWxC, npz/tiff format)
+│       ├── cells/         # Cell segmentation masks (HxW, npz/tiff format)
+│       └── cells2labels/  # Cell labels (npz/txt format)
 ├── src/            # Source code
 ├── notebooks/      # Jupyter notebooks for experiments
 ├── configs/        # Configuration files
 └── results/        # Model outputs and evaluations
 ```
+
+### Data Structure Details
+
+The `datasets/CellTypes/` directory follows a specific structure for organizing image data, segmentation masks, and labels:
+
+1. **Raw Images** (`data/images/`):
+   - Format: `.npz` or `.tiff`
+   - Shape: Height × Width × Channels (HxWxC)
+   - C represents the number of protein channels
+
+2. **Cell Segmentation** (`cells/`):
+   - Format: `.npz` or `.tiff`
+   - Shape: Height × Width (HxW)
+   - Contains labeled object matrix where each cell has a unique ID (1 to N)
+
+3. **Cell Labels** (`cells2labels/`):
+   - Format: `.npz` or `.txt`
+   - Each row corresponds to a cell ID
+   - Unlabeled cells (e.g., test data) are marked as -1
 
 ## Getting Started
 

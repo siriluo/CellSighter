@@ -1,5 +1,6 @@
-# Data directory
+# Data directories
 data/
+datasets/
 
 # Python
 __pycache__/
