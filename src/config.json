@@ -1,0 +1,17 @@
+{
+    "crop_input_size": 60,
+    "crop_size": 128,
+    "root_dir": "/u/shirui/bbka/CellSighter/datasets",
+    "train_set": ["reg001_A", "reg002_A", "reg003_A", "reg004_A", "reg005_A", "reg006_A", "reg007_A", "reg008_A", "reg009_A", "reg010_A", "reg011_A", "reg012_A", "reg013_A", "reg014_A", "reg015_A", "reg016_A", "reg017_A", "reg018_A", "reg019_A", "reg020_A", "reg021_A", "reg022_A", "reg023_A", "reg024_A", "reg025_A", "reg026_A", "reg027_A", "reg028_A", "reg029_A", "reg030_A", "reg031_A", "reg032_A", "reg033_A", "reg034_A", "reg035_A", "reg036_A", "reg037_A", "reg038_A", "reg039_A", "reg040_A", "reg041_A", "reg042_A", "reg043_A", "reg044_A", "reg045_A", "reg046_A", "reg047_A", "reg048_A", "reg049_A", "reg050_A", "reg051_A", "reg052_A", "reg053_A", "reg054_A", "reg055_A", "reg056_A", "reg057_A", "reg058_A", "reg059_A", "reg060_A", "reg061_A", "reg062_A", "reg063_A", "reg064_A", "reg001_B", "reg002_B", "reg003_B", "reg004_B", "reg005_B", "reg006_B", "reg007_B", "reg008_B", "reg009_B", "reg010_B", "reg011_B", "reg012_B", "reg013_B", "reg014_B", "reg015_B", "reg016_B", "reg017_B", "reg018_B", "reg019_B", "reg020_B", "reg021_B", "reg022_B", "reg023_B", "reg024_B", "reg025_B", "reg026_B", "reg027_B", "reg028_B", "reg029_B", "reg030_B", "reg031_B", "reg032_B", "reg033_B", "reg034_B", "reg035_B", "reg036_B", "reg037_B", "reg038_B", "reg039_B", "reg040_B", "reg041_B", "reg042_B", "reg043_B", "reg044_B", "reg045_B", "reg046_B", "reg047_B", "reg048_B", "reg049_B", "reg050_B", "reg051_B", "reg052_B", "reg053_B", "reg054_B", "reg055_B", "reg056_B", "reg057_B", "reg058_B", "reg059_B", "reg060_B", "reg061_B", "reg062_B", "reg063_B", "reg064_B"],
+    "val_set": ["reg065_A", "reg066_A", "reg067_A", "reg068_A"],
+    "num_classes": 2,
+    "epoch_max": 40,
+    "lr": 0.001,
+    "batch_size": 64,
+    "num_workers": 6,
+    "weight_to_eval": "",
+    "sample_batch": false,
+    "to_pad": false,
+    "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
+    "aug": false
+}

@@ -1,6 +1,6 @@
 # Data directories
-data/
 datasets/
+HIDEFACS/
 
 # Python
 __pycache__/
