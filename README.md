@@ -18,10 +18,6 @@ This project implements an advanced pipeline for tumor cell classification that 
    - Enhance separation between different cell types
    - Improve discriminative power across tumor phenotypes
 
-## Technical Support
-
-This project is developed in collaboration with the National Center for Supercomputing Applications (NCSA) to accelerate model prototyping and implementation.
-
 ## Project Structure
 
 ```
