@@ -115,22 +115,33 @@ def create_validation_transform(crop_size: int) -> Callable:
     ])
 
 
-def create_training_transform(crop_size: int, shift: int) -> Callable:
+def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> Callable:
     """Create transformation pipeline for training data."""
     augmentor = ImageAugmentor()
-    
-    return torchvision.transforms.Compose([
-        torchvision.transforms.Lambda(augmentor.poisson_sampling),
-        torchvision.transforms.Lambda(augmentor.augment_cell_shape),
-        torchvision.transforms.Lambda(augmentor.augment_environment_shape),
-        torchvision.transforms.ToTensor(),
-        torchvision.transforms.RandomRotation(degrees=(0, 360)),
-        Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
-              if np.random.random() < 0.5 else x),
-        torchvision.transforms.CenterCrop((crop_size, crop_size)),
-        torchvision.transforms.RandomHorizontalFlip(p=0.75),
-        torchvision.transforms.RandomVerticalFlip(p=0.75),
-    ])
+
+    if mask:
+        return torchvision.transforms.Compose([
+            torchvision.transforms.Lambda(augmentor.poisson_sampling),
+            torchvision.transforms.Lambda(augmentor.augment_cell_shape),
+            torchvision.transforms.Lambda(augmentor.augment_environment_shape),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.RandomRotation(degrees=(0, 360)),
+            Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
+                if np.random.random() < 0.5 else x),
+            torchvision.transforms.CenterCrop((crop_size, crop_size)),
+            torchvision.transforms.RandomHorizontalFlip(p=0.75),
+            torchvision.transforms.RandomVerticalFlip(p=0.75),
+        ])
+    else:
+        return torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.RandomRotation(degrees=(0, 360)),
+            Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
+                if np.random.random() < 0.5 else x),
+            torchvision.transforms.CenterCrop((crop_size, crop_size)),
+            torchvision.transforms.RandomHorizontalFlip(p=0.75),
+            torchvision.transforms.RandomVerticalFlip(p=0.75),
+        ])
 
 
 

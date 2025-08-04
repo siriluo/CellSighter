@@ -52,6 +52,7 @@ Thumbs.db
 # Model checkpoints and results
 results/
 checkpoints/
+experiment_results/
 *.pth
 *.ckpt
 *.h5

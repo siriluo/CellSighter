@@ -51,11 +51,14 @@ def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]
     val_crops = load_samples(config, config['val_set'])
     print(f"Loaded {len(val_crops)} validation samples")
     
+    use_mask = False
+
     # Create transforms
     if config.get('aug', False):
         train_transform = create_training_transform(
             crop_size=config['crop_size'],
-            shift=config.get('shift', 5)
+            shift=config.get('shift', 5),
+            mask=use_mask,
         )
         print("Using data augmentation for training")
     else:
@@ -68,13 +71,13 @@ def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]
     train_dataset = CellCropsDataset(
         crops=train_crops,
         transform=train_transform,
-        mask=False  # Set to True if you want to include mask information
+        mask=use_mask  # Set to True if you want to include mask information
     )
     
     val_dataset = CellCropsDataset(
         crops=val_crops,
         transform=val_transform,
-        mask=False
+        mask=use_mask
     )
     
     # Print dataset statistics
@@ -111,7 +114,7 @@ def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     for i in range(len(dataset)):
         sample = dataset[i]
         label = sample['label'].item()
-        binary_label = 1 if label > 0 else 0
+        binary_label = label #  1 if label > 0 else 0
         labels.append(binary_label)
     
     labels = np.array(labels)
@@ -198,7 +201,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Get input channels from a sample
     sample_batch = next(iter(train_loader))
-    input_channels = sample_batch['image'].shape[1]
+    input_channels = sample_batch['image'].shape[1] #  5 #
     print(f"Input channels: {input_channels}")
     
     # Create model

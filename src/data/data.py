@@ -58,7 +58,8 @@ class CellCropsDataset(Dataset):
         """
         # Get raw sample from CellCrop
         sample = self._crops[idx].sample(self._mask)
-        
+        # print("break?")
+
         if self._mask:
             # Stack image with masks
             stacked = np.dstack([
@@ -77,6 +78,9 @@ class CellCropsDataset(Dataset):
         else:
             # Just transform the image if no mask needed
             if self._transform:
-                sample['image'] = self._transform(sample['image']).float()
+                # print("breaking point")
+                # print(sample['image'].shape)
+                # print(self._transform(np.dstack([sample['image']])).float().shape)
+                sample['image'] = self._transform(np.dstack([sample['image']])).float()
         
         return sample

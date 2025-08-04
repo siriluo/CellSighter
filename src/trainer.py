@@ -102,17 +102,25 @@ class Trainer:
         
         for batch_idx, batch in enumerate(self.train_loader):
             # Move data to device
-            images = batch['image'].to(self.device)
+            images = batch['image'] # .to(self.device)
             labels = batch['label'].to(self.device)
+
+            # Code to append mask dimensions
+            m = batch.get('mask', None)
+            if m is not None:
+                images = torch.cat([images, m], dim=1)
+
+            images = images.to(self.device)
             
             # Convert labels to binary (0: non-tumor, 1: tumor)
-            binary_labels = (labels > 0).long()
+            binary_labels = labels.long() # (labels > 0)
             
             # Zero gradients
             self.optimizer.zero_grad()
             
             # Forward pass
             outputs = self.model(images)
+
             loss = self.criterion(outputs, binary_labels)
             
             # Backward pass
@@ -153,9 +161,14 @@ class Trainer:
         
         with torch.no_grad():
             for batch in self.val_loader:
-                images = batch['image'].to(self.device)
+                images = batch['image'] #.to(self.device)
                 labels = batch['label'].to(self.device)
                 
+                m = batch.get('mask', None)
+                if m is not None:
+                    images = torch.cat([images, m], dim=1)
+                images = images.to(self.device)
+
                 # Convert labels to binary
                 binary_labels = (labels > 0).long()
                 
@@ -418,8 +431,13 @@ class Trainer:
         
         with torch.no_grad():
             for batch in test_loader:
-                images = batch['image'].to(self.device)
+                images = batch['image'] #.to(self.device)
                 labels = batch['label'].to(self.device)
+                
+                m = batch.get('mask', None)
+                if m is not None:
+                    images = torch.cat([images, m], dim=1)
+                images = images.to(self.device)
                 
                 # Convert labels to binary
                 binary_labels = (labels > 0).long()
