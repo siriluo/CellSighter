@@ -37,4 +37,4 @@
 source activate cellsighter_UNI_env
 
 # Run the python script(code)
-python train_classifier.py --config /projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/config.json
+python train_classifier.py --model resnet --config /projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/config.json

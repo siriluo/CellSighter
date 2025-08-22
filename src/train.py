@@ -1,4 +1,4 @@
-"""
+f"""
 train.py - Main Training Script for Cell Classification
 
 This script handles the complete training pipeline:
@@ -51,7 +51,7 @@ def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]
     val_crops = load_samples(config, config['val_set'])
     print(f"Loaded {len(val_crops)} validation samples")
     
-    use_mask = False
+    use_mask = True
 
     # Create transforms
     if config.get('aug', False):
@@ -201,7 +201,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Get input channels from a sample
     sample_batch = next(iter(train_loader))
-    input_channels = sample_batch['image'].shape[1] #  5 #
+    input_channels = 5 # sample_batch['image'].shape[1] # 
     print(f"Input channels: {input_channels}")
     
     # Create model
