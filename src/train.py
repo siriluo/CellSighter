@@ -104,6 +104,28 @@ def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]
     return train_loader, val_loader
 
 
+def get_multiclass_ct_name(label):
+
+    new_mapping = {
+        0: "CD4+ T",
+        1: "CD8+ T",
+        2: "Treg",
+        3: "B cells",
+        4: "NK Cells",
+        5: "Dendritic Cells",
+        6: "Monocytes / Macrophages",
+        7: "Stromal Cells",
+        8: "Smooth Muscle",
+        9: "Tumor Cells",
+        10: "Vasculature",
+        11: "Granulocytes",
+    }
+
+    class_name = new_mapping[label]
+
+    return class_name
+
+
 def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     """Print statistics about the dataset."""
     print(f"\n{dataset_name} Dataset Statistics:")
@@ -122,7 +144,7 @@ def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     
     print(f"Class distribution:")
     for label, count in zip(unique, counts):
-        class_name = "Tumor" if label == 1 else "Non-tumor"
+        class_name = get_multiclass_ct_name(label) # "Tumor" if label == 1 else "Non-tumor"
         percentage = (count / len(labels)) * 100
         print(f"  {class_name} (label {label}): {count} samples ({percentage:.1f}%)")
     
@@ -139,8 +161,9 @@ def calculate_class_weights(train_loader: DataLoader, device: str) -> torch.Tens
     all_labels = []
     for batch in train_loader:
         labels = batch['label']
-        binary_labels = (labels > 0).long()
-        all_labels.extend(binary_labels.numpy())
+        # binary_labels = (labels > 0).long()
+        long_labels = labels.long() # (labels > 0)
+        all_labels.extend(long_labels.numpy())
     
     all_labels = np.array(all_labels)
     class_weights = compute_class_weight(
@@ -245,6 +268,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         val_loader=val_loader,
         criterion=criterion,
         optimizer=optimizer,
+        num_classes=config['num_classes'],
         scheduler=scheduler,
         device=device,
         save_dir=save_dir,
@@ -293,11 +317,13 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Final evaluation AUC: {eval_results['auc']:.4f}")
     
     print(f"\nConfusion Matrix:")
-    cm = np.array(eval_results['confusion_matrix'])
-    print(f"                Predicted")
-    print(f"              Non-tumor  Tumor")
-    print(f"Actual Non-tumor    {cm[0, 0]:5d}  {cm[0, 1]:5d}")
-    print(f"       Tumor        {cm[1, 0]:5d}  {cm[1, 1]:5d}")
+
+    if config['num_classes'] <= 2:
+        cm = np.array(eval_results['confusion_matrix'])
+        print(f"                Predicted")
+        print(f"              Non-tumor  Tumor")
+        print(f"Actual Non-tumor    {cm[0, 0]:5d}  {cm[0, 1]:5d}")
+        print(f"       Tumor        {cm[1, 0]:5d}  {cm[1, 1]:5d}")
     
     print(f"\nModel and results saved to: {save_dir}")
     print(f"Best model: {os.path.join(save_dir, 'best_model.pth')}")

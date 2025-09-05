@@ -35,6 +35,7 @@ class Trainer:
                  val_loader: DataLoader,
                  criterion: nn.Module,
                  optimizer: optim.Optimizer,
+                 num_classes: int,
                  scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
                  device: str = 'cuda',
                  save_dir: str = './checkpoints',
@@ -58,6 +59,7 @@ class Trainer:
         self.val_loader = val_loader
         self.criterion = criterion
         self.optimizer = optimizer
+        self.num_classes = num_classes
         self.scheduler = scheduler
         self.device = device
         self.save_dir = save_dir
@@ -78,6 +80,9 @@ class Trainer:
             'val_auc': [],
             'learning_rates': []
         }
+
+        if self.num_classes > 2:
+            self.history.update({'val_multi_auc': []})
         
         # Best model tracking
         self.best_val_acc = 0.0
@@ -113,7 +118,7 @@ class Trainer:
             images = images.to(self.device)
             
             # Convert labels to binary (0: non-tumor, 1: tumor)
-            binary_labels = labels.long() # (labels > 0)
+            long_labels = labels.long() # (labels > 0)
             
             # Zero gradients
             self.optimizer.zero_grad()
@@ -121,7 +126,7 @@ class Trainer:
             # Forward pass
             outputs = self.model(images)
 
-            loss = self.criterion(outputs, binary_labels)
+            loss = self.criterion(outputs, long_labels)
             
             # Backward pass
             loss.backward()
@@ -129,8 +134,12 @@ class Trainer:
             
             # Statistics
             running_loss += loss.item() * images.size(0)
-            _, preds = torch.max(outputs, 1)
-            running_corrects += torch.sum(preds == binary_labels.data)
+            if self.num_classes > 2:
+                preds = outputs.argmax(1)
+            else:
+                _, preds = torch.max(outputs, 1) # Change this to a softmax operation?
+            # print(preds)
+            running_corrects += torch.sum(preds == long_labels.data) #  
             total_samples += images.size(0)
             
             # Log progress
@@ -158,6 +167,7 @@ class Trainer:
         all_preds = []
         all_labels = []
         all_probs = []
+        # all_probs_test = []
         
         with torch.no_grad():
             for batch in self.val_loader:
@@ -170,34 +180,68 @@ class Trainer:
                 images = images.to(self.device)
 
                 # Convert labels to binary
-                binary_labels = (labels > 0).long()
-                
+                # binary_labels = (labels > 0).long()
+                long_labels = labels.long() # (labels > 0)
+
                 # Forward pass
                 outputs = self.model(images)
-                loss = self.criterion(outputs, binary_labels)
+                loss = self.criterion(outputs, long_labels)
                 
                 # Get predictions and probabilities
                 probs = torch.softmax(outputs, dim=1)
-                _, preds = torch.max(outputs, 1)
+
+                if self.num_classes > 2:
+                    preds = probs.argmax(1)
+                else:
+                    _, preds = torch.max(outputs, 1)
                 
                 # Collect results
+                # print(probs.shape)
                 running_loss += loss.item() * images.size(0)
                 all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(binary_labels.cpu().numpy())
-                all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
+                all_labels.extend(long_labels.cpu().numpy())
+                # print(probs[:, 1].cpu().numpy().shape)
+                if self.num_classes <= 2:
+                    all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
+                else:
+                    all_probs.append(probs.cpu().numpy())
         
         # Calculate metrics
         avg_loss = running_loss / len(self.val_loader.dataset)
         accuracy = accuracy_score(all_labels, all_preds)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            all_labels, all_preds, average='binary', zero_division=0
-        )
-        
+
+        if self.num_classes <= 2:
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                all_labels, all_preds, average='binary', zero_division=0
+            )
+        else:
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                all_labels, all_preds, average='weighted', zero_division=0
+            )
+            
         # Calculate AUC if we have both classes
+        # multi_aucs_ran_test=False
         try:
-            auc = roc_auc_score(all_labels, all_probs)
-        except ValueError:
+            if self.num_classes <= 2:
+                auc = roc_auc_score(all_labels, all_probs)
+            else:
+                # print(len(all_labels))
+                # print(len(all_probs))
+                all_probs = np.vstack(all_probs)
+                # print(all_probs_test.shape)
+                # multi_aucs_ran_test = True
+
+                auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
+                multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
+                
+        except ValueError as e:
             auc = 0.0  # Handle case where only one class is present
+            if self.num_classes > 2:
+                multi_aucs = []
+            # print(f"value error occurred in multi_aucs run: {multi_aucs_ran_test}")
+            # raise 
+
+
         
         metrics = {
             'loss': avg_loss,
@@ -207,6 +251,10 @@ class Trainer:
             'f1': f1,
             'auc': auc
         }
+
+        if self.num_classes > 2:
+            multi_aucs_list = multi_aucs.tolist()
+            metrics.update({'multi_aucs': multi_aucs_list})
         
         return metrics
     
@@ -252,6 +300,9 @@ class Trainer:
             self.history['val_recall'].append(val_metrics['recall'])
             self.history['val_f1'].append(val_metrics['f1'])
             self.history['val_auc'].append(val_metrics['auc'])
+
+            if self.num_classes > 2:
+                self.history['val_multi_auc'].append(val_metrics['multi_aucs'])
             
             # Print epoch results
             epoch_time = time.time() - epoch_start_time
@@ -440,27 +491,45 @@ class Trainer:
                 images = images.to(self.device)
                 
                 # Convert labels to binary
-                binary_labels = (labels > 0).long()
-                
+                long_labels = labels.long() # (labels > 0)  
+
                 # Forward pass
                 outputs = self.model(images)
                 probs = torch.softmax(outputs, dim=1)
-                _, preds = torch.max(outputs, 1)
+
+                if self.num_classes > 2:
+                    preds = probs.argmax(1)
+                else:
+                    _, preds = torch.max(outputs, 1)
+                # _, preds = torch.max(outputs, 1)
                 
                 # Collect results
                 all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(binary_labels.cpu().numpy())
-                all_probs.extend(probs[:, 1].cpu().numpy())
+                all_labels.extend(long_labels.cpu().numpy())
+                if self.num_classes <= 2:
+                    all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
+                else:
+                    all_probs.append(probs.cpu().numpy())
         
+        outputs = self.model.avgpool(images)
+        # features = outputs.pooler_output.squeeze()
+        print(outputs.cpu().squeeze().numpy().shape)
+
         # Calculate metrics
         accuracy = accuracy_score(all_labels, all_preds)
+
+        if self.num_classes <= 2:
+            average_method = 'binary'
+        else:
+            average_method = 'weighted'
+
         precision, recall, f1, support = precision_recall_fscore_support(
             all_labels, all_preds, average=None, zero_division=0
         )
         
         # Overall metrics
         precision_avg, recall_avg, f1_avg, _ = precision_recall_fscore_support(
-            all_labels, all_preds, average='binary', zero_division=0
+            all_labels, all_preds, average=average_method, zero_division=0
         )
         
         # Confusion matrix
@@ -468,9 +537,17 @@ class Trainer:
         
         # AUC
         try:
-            auc = roc_auc_score(all_labels, all_probs)
+            if self.num_classes <= 2:
+                auc = roc_auc_score(all_labels, all_probs)
+            else:
+                all_probs = np.vstack(all_probs)
+                
+                auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
+                multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
         except ValueError:
-            auc = 0.0
+            auc = 0.0  # Handle case where only one class is present
+            if self.num_classes > 2:
+                multi_aucs = []
         
         results = {
             'accuracy': accuracy,
@@ -485,5 +562,14 @@ class Trainer:
             'confusion_matrix': cm.tolist(),
             'class_names': ['Non-tumor', 'Tumor']
         }
+
+        if self.num_classes > 2:
+            multi_aucs_list = multi_aucs.tolist()
+            results.update({'multi_class_aucs': multi_aucs_list})
         
         return results
+    
+
+        
+
+

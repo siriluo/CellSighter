@@ -1,0 +1,47 @@
+{
+  "crop_input_size": 60,
+  "crop_size": 128,
+  "root_dir": "/projects/illinois/vetmed/cb/kwang222/processed_cia_crc_ffpe_data/cellsighter_processed/New_CT_categories",
+  "train_set": [
+    "reg001_A",
+    "reg002_A",
+    "reg001_B",
+    "reg002_B"
+  ],
+  "val_set": [
+    "reg047_A",
+    "reg048_A",
+    "reg049_A",
+    "reg050_A",
+    "reg057_A",
+    "reg058_A",
+    "reg065_A",
+    "reg066_A",
+    "reg067_A",
+    "reg068_A",
+    "reg047_B",
+    "reg048_B",
+    "reg049_B",
+    "reg050_B",
+    "reg057_B",
+    "reg058_B",
+    "reg065_B",
+    "reg066_B",
+    "reg067_B",
+    "reg068_B"
+  ],
+  "num_classes": 12,
+  "epoch_max": 1,
+  "lr": 0.001,
+  "batch_size": 64,
+  "num_workers": 6,
+  "weight_to_eval": "",
+  "sample_batch": false,
+  "to_pad": false,
+  "hierarchy_match": {
+    "0": "other cells",
+    "1": "tumor cells"
+  },
+  "aug": true,
+  "save_dir": "./checkpoints"
+}
