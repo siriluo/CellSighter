@@ -14,7 +14,7 @@
 #SBATCH --nodes=1                        # Number of nodes
 #SBATCH --ntasks-per-node=16             # Number of task (cores/ppn) per node
 #SBATCH --job-name=python_job            # Name of batch job
-#SBATCH --partition=secondary            # Partition (queue)
+#SBATCH --partition=secondary            # Partition (queue) 
 #SBATCH --account=ACCT_NAME              # Bactch account to use
 #SBATCH --output=python_job.o%j          # Name of batch job output file
 ##SBATCH --error=python_job.e%j          # Name of batch job error file

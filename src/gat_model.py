@@ -4,9 +4,138 @@ import torch.nn.functional as F
 from torch_geometric.nn import GATv2Conv, global_mean_pool, global_max_pool
 from torch_geometric.data import Data, DataLoader
 from torch_geometric.transforms import Compose, NormalizeFeatures, AddSelfLoops
-from torch_geometric.utils import dropout_adj
+from torch_geometric.utils import dropout_adj, softmax
 import numpy as np
 from typing import Optional, Union, Tuple
+# from einops import rearrange
+
+
+
+model_dict = {
+    'resnet18': [512],
+    'resnet34': [512],
+    'resnet50': [2048],
+    'resnet101': [2048],
+}
+    
+
+class GraphAttentionLayer(nn.Module):
+    """
+    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+        super(GraphAttentionLayer, self).__init__()
+        self.dropout = dropout
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+
+    def forward(self, h, adj):
+        Wh = torch.matmul(h, self.W) # h.shape: (B, N, in_features), Wh.shape: (N, out_features)
+        e = self._prepare_attentional_mechanism_input(Wh)
+
+        zero_vec = -9e15*torch.ones_like(e) # B N N
+        attention = torch.where(adj > 0, e, zero_vec)
+        attention = F.softmax(attention, dim=1)
+        attention = F.dropout(attention, self.dropout, training=self.training)
+        h_prime = torch.matmul(attention, Wh)
+
+        if self.concat:
+            return F.elu(h_prime)
+        else:
+            return h_prime
+
+    def _prepare_attentional_mechanism_input(self, Wh):
+        # Wh.shape (N, out_feature)
+        # self.a.shape (2 * out_feature, 1)
+        # Wh1&2.shape (N, 1)
+        # e.shape (N, N)
+        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])
+        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])
+        # broadcast add
+        e = Wh1 + Wh2.transpose(-1, -2)
+        return self.leakyrelu(e)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
+
+
+class GraphAttentionLayerMod(nn.Module):
+    """
+    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
+    """
+    def __init__(self, in_features, out_features, dropout, alpha, concat=True):
+        super(GraphAttentionLayerMod, self).__init__()
+        self.dropout = dropout
+        self.in_features = in_features
+        self.out_features = out_features
+        self.alpha = alpha
+        self.concat = concat
+
+        self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
+        nn.init.xavier_uniform_(self.W.data, gain=1.414)
+        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))
+        nn.init.xavier_uniform_(self.a.data, gain=1.414)
+
+        self.leakyrelu = nn.LeakyReLU(self.alpha)
+
+    def forward(self, h, edge_index):
+        # Wh = torch.matmul(h, self.W) # h.shape: (B, N, in_features), Wh.shape: (N, out_features)
+        # e = self._prepare_attentional_mechanism_input(Wh)
+
+        # Linear transformation
+        Wh = torch.matmul(h, self.W)  # [num_nodes, out_features]
+        
+        # Get source and target node indices
+        edge_index_i = edge_index[0]  # Source nodes
+        edge_index_j = edge_index[1]  # Target nodes
+        
+        # Compute attention coefficients
+        Wh_i = torch.matmul(Wh, self.a[:self.out_features, :])  # [num_nodes, 1]
+        Wh_j = torch.matmul(Wh, self.a[self.out_features:, :])  # [num_nodes, 1]
+        
+        # Attention for each edge
+        e = Wh_i[edge_index_i] + Wh_j[edge_index_j]  # [num_edges, 1]
+        e = self.leakyrelu(e)
+        
+
+        # zero_vec = -9e15*torch.ones_like(e) # B N N
+        # attention = torch.where(adj > 0, e, zero_vec)
+
+        # Normalize attention coefficients using softmax
+        # PyG's softmax handles per-node normalization automatically
+        attention = softmax(e, edge_index_j, num_nodes=h.size(0))  # [num_edges, 1]
+
+        attention = F.softmax(attention, dim=1)
+        attention = F.dropout(attention, self.dropout, training=self.training)
+        h_prime = torch.matmul(attention, Wh)
+
+        if self.concat:
+            return F.elu(h_prime)
+        else:
+            return h_prime
+
+    def _prepare_attentional_mechanism_input(self, Wh):
+        # Wh.shape (N, out_feature)
+        # self.a.shape (2 * out_feature, 1)
+        # Wh1&2.shape (N, 1)
+        # e.shape (N, N)
+        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])
+        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])
+        # broadcast add
+        e = Wh1 + Wh2.transpose(-1, -2)
+        return self.leakyrelu(e)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
 
 
 class GATv2Model(nn.Module):
@@ -207,4 +336,68 @@ class GATv2Model(nn.Module):
                 x, edge_index, return_attention_weights=True
             )
             return attention_weights[layer_idx]
+
+
+class GATv2ClassificationHead(nn.Module):
+    def __init__(self,
+        num_heads: int = 4,
+        num_layers: int = 3,
+        num_classes: int = 2,
+        dropout_rate: float = 0.5,
+        attention_dropout: float = 0.2,
+        task_type: str = "node",  # "node" or "graph"
+        residual: bool = True,
+        normalize: bool = True,
+        name='resnet50',
+        **kwargs):
+        super(GATv2ClassificationHead, self).__init__(**kwargs)
+
+        feat_dim = model_dict[name][0]
+
+        heads = num_heads # if i < num_layers - 1 else 1
+
+        self.feature_norm = nn.LayerNorm(feat_dim)
+
+        self.gat_layer = GATv2Conv(
+            in_channels=feat_dim,
+            out_channels=feat_dim,
+            heads=heads,
+            dropout=dropout_rate, # attention_dropout
+            concat=False, # if i < num_layers - 1 else False
+        )
+
+        self.classifier = nn.Sequential(
+            # nn.Dropout(dropout_rate),
+            # nn.Linear(input_dim, 256),
+            # nn.ReLU(inplace=True),
+            # nn.Dropout(dropout_rate),
+            nn.Linear(feat_dim, num_classes)
+        )
+
+
+
+    def forward(self,         
+        x: torch.Tensor, 
+        edge_index: torch.Tensor, 
+        batch: Optional[torch.Tensor] = None,
+        edge_attr: Optional[torch.Tensor] = None,
+        return_attention_weights: bool = False) -> torch.Tensor:
+
+        attention_weights = []
+
+        features = self.feature_norm(x)
+
+        graph_feats = self.gat_layer(x, edge_index)
+        if return_attention_weights:
+            graph_feats, (edge_index_att, att_weights) = self.gat_layer(
+                x, edge_index, return_attention_weights=True
+            )
+            attention_weights.append((edge_index_att, att_weights))
+        else:
+            graph_feats = self.gat_layer(x, edge_index)
+
+        probs = self.classifier(graph_feats)
+
+        return probs
+
 

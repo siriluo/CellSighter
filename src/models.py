@@ -260,6 +260,7 @@ class CellClassifierResNet(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through ResNet."""
+        print(x.shape)
         x = F.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         
@@ -280,39 +281,15 @@ class CellClassifierResNetFeatureExtractor(nn.Module):
     Feature extractor version of CellClassifierResNet.
     Allows extraction of features from different layers and provides flexible output options.
     """
-    
+        
     def __init__(self, 
                  input_channels: int = 3,
                  num_classes: int = 2,
-                 dropout_rate: float = 0.3,
-                 feature_layer: str = 'avgpool',
-                 feature_dim: Optional[int] = None,
-                 return_all_features: bool = False):
-        """
-        Initialize the feature extractor.
-        
-        Args:
-            input_channels: Number of input channels
-            num_classes: Number of output classes (used if loading pretrained weights)
-            dropout_rate: Dropout rate for classifier (if needed for weight loading)
-            feature_layer: Layer to extract features from. Options:
-                - 'conv1': After initial convolution (64 channels)
-                - 'layer1': After first residual layer (64 channels)
-                - 'layer2': After second residual layer (128 channels)
-                - 'layer3': After third residual layer (256 channels)
-                - 'layer4': After fourth residual layer (512 channels)
-                - 'avgpool': After global average pooling (512 features)
-                - 'classifier_input': Before final classification layers (512 features)
-            feature_dim: If specified, add a projection layer to this dimension
-            return_all_features: If True, return features from multiple layers
-        """
+                 dropout_rate: float = 0.3):
         super(CellClassifierResNetFeatureExtractor, self).__init__()
         
         self.input_channels = input_channels
         self.num_classes = num_classes
-        self.feature_layer = feature_layer
-        self.feature_dim = feature_dim
-        self.return_all_features = return_all_features
         
         # Initial convolution
         self.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -325,35 +302,15 @@ class CellClassifierResNetFeatureExtractor(nn.Module):
         self.layer3 = self._make_layer(128, 256, 2, stride=2)
         self.layer4 = self._make_layer(256, 512, 2, stride=2)
         
-        # Global average pooling
+        # Classification head
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        
-        # Keep classifier for potential weight loading compatibility
-        self.classifier = nn.Sequential(
-            nn.Dropout(dropout_rate),
-            nn.Linear(512, 256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
-            nn.Linear(256, num_classes)
-        )
-        
-        # Feature dimensions for each layer
-        self.feature_dims = {
-            'conv1': 64,
-            'layer1': 64,
-            'layer2': 128,
-            'layer3': 256,
-            'layer4': 512,
-            'avgpool': 512,
-            'classifier_input': 512
-        }
-        
-        # Optional projection layer
-        if feature_dim is not None:
-            output_dim = self.feature_dims.get(feature_layer, 512)
-            self.projection = nn.Linear(output_dim, feature_dim)
-        else:
-            self.projection = nn.Identity()
+        # self.classifier = nn.Sequential(
+        #     nn.Dropout(dropout_rate),
+        #     nn.Linear(512, 256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(dropout_rate),
+        #     nn.Linear(256, num_classes)
+        # )
         
         self._initialize_weights()
     
@@ -388,74 +345,101 @@ class CellClassifierResNetFeatureExtractor(nn.Module):
             If return_all_features=False: Feature tensor from specified layer
             If return_all_features=True: Dictionary with features from all layers
         """
-        features = {}
-        
-        # Initial convolution
         x = F.relu(self.bn1(self.conv1(x)))
-        features['conv1'] = x
-        if self.feature_layer == 'conv1' and not self.return_all_features:
-            return self._process_output(x, 'conv1')
-        
         x = self.maxpool(x)
         
-        # Residual layers
         x = self.layer1(x)
-        features['layer1'] = x
-        if self.feature_layer == 'layer1' and not self.return_all_features:
-            return self._process_output(x, 'layer1')
-        
         x = self.layer2(x)
-        features['layer2'] = x
-        if self.feature_layer == 'layer2' and not self.return_all_features:
-            return self._process_output(x, 'layer2')
-        
         x = self.layer3(x)
-        features['layer3'] = x
-        if self.feature_layer == 'layer3' and not self.return_all_features:
-            return self._process_output(x, 'layer3')
-        
         x = self.layer4(x)
-        features['layer4'] = x
-        if self.feature_layer == 'layer4' and not self.return_all_features:
-            return self._process_output(x, 'layer4')
         
-        # Global average pooling
         x = self.avgpool(x)
-        x_pooled = torch.flatten(x, 1)
-        features['avgpool'] = x_pooled
-        features['classifier_input'] = x_pooled
-        
-        if self.return_all_features:
-            # Process all features and return dictionary
-            processed_features = {}
-            for layer_name, feat in features.items():
-                processed_features[layer_name] = self._process_output(feat, layer_name)
-            return processed_features
-        else:
-            # Return features from specified layer
-            if self.feature_layer in ['avgpool', 'classifier_input']:
-                return self._process_output(x_pooled, self.feature_layer)
-            else:
-                # This shouldn't happen if the above conditions are correct
-                return self._process_output(x_pooled, 'avgpool')
-    
-    def _process_output(self, x: torch.Tensor, layer_name: str) -> torch.Tensor:
-        """Process output features (flatten if needed, apply projection)."""
-        # Flatten spatial features if they're not already flattened
-        if len(x.shape) > 2:
-            if layer_name in ['avgpool', 'classifier_input']:
-                x = torch.flatten(x, 1)
-            else:
-                # For spatial features, apply global average pooling
-                x = F.adaptive_avg_pool2d(x, (1, 1))
-                x = torch.flatten(x, 1)
-        
-        # Apply projection if specified
-        if hasattr(self, 'projection') and self.projection is not None:
-            x = self.projection(x)
+        x = torch.flatten(x, 1)
         
         return x
+        # features = {}
+        
+        # # Initial convolution
+        # x = F.relu(self.bn1(self.conv1(x)))
+        # features['conv1'] = x
+        # if self.feature_layer == 'conv1' and not self.return_all_features:
+        #     return self._process_output(x, 'conv1')
+        
+        # x = self.maxpool(x)
+        
+        # # Residual layers
+        # x = self.layer1(x)
+        # features['layer1'] = x
+        # if self.feature_layer == 'layer1' and not self.return_all_features:
+        #     return self._process_output(x, 'layer1')
+        
+        # x = self.layer2(x)
+        # features['layer2'] = x
+        # if self.feature_layer == 'layer2' and not self.return_all_features:
+        #     return self._process_output(x, 'layer2')
+        
+        # x = self.layer3(x)
+        # features['layer3'] = x
+        # if self.feature_layer == 'layer3' and not self.return_all_features:
+        #     return self._process_output(x, 'layer3')
+        
+        # x = self.layer4(x)
+        # features['layer4'] = x
+        # if self.feature_layer == 'layer4' and not self.return_all_features:
+        #     return self._process_output(x, 'layer4')
+        
+        # # Global average pooling
+        # x = self.avgpool(x)
+        # x_pooled = torch.flatten(x, 1)
+        # features['avgpool'] = x_pooled
+        # features['classifier_input'] = x_pooled
+        
+        # if self.return_all_features:
+        #     # Process all features and return dictionary
+        #     processed_features = {}
+        #     for layer_name, feat in features.items():
+        #         processed_features[layer_name] = self._process_output(feat, layer_name)
+        #     return processed_features
+        # else:
+        #     # Return features from specified layer
+        #     if self.feature_layer in ['avgpool', 'classifier_input']:
+        #         return self._process_output(x_pooled, self.feature_layer)
+        #     else:
+        #         # This shouldn't happen if the above conditions are correct
+        #         return self._process_output(x_pooled, 'avgpool')
     
+    # def _process_output(self, x: torch.Tensor, layer_name: str) -> torch.Tensor:
+    #     """Process output features (flatten if needed, apply projection)."""
+    #     # Flatten spatial features if they're not already flattened
+    #     if len(x.shape) > 2:
+    #         if layer_name in ['avgpool', 'classifier_input']:
+    #             x = torch.flatten(x, 1)
+    #         else:
+    #             # For spatial features, apply global average pooling
+    #             x = F.adaptive_avg_pool2d(x, (1, 1))
+    #             x = torch.flatten(x, 1)
+        
+    #     # Apply projection if specified
+    #     if hasattr(self, 'projection') and self.projection is not None:
+    #         x = self.projection(x)
+        
+    #     return x
+    
+class ConvNextV2(nn.Module):
+    """
+    Placeholder for ConvNeXtV2 architecture.
+    Actual implementation would require detailed layer definitions.
+    """
+    def __init__(self, input_channels: int = 3, num_classes: int = 2):
+        super(ConvNextV2, self).__init__()
+        # Implementation would go here
+        pass
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Implementation would go here
+        pass
+
+
 
 # Utility function to create feature extractor from existing model
 def convert_to_feature_extractor(model: nn.Module, 
@@ -508,10 +492,14 @@ def create_model(model_type: str = 'cnn', **kwargs) -> nn.Module:
     Returns:
         Initialized model
     """
+    contrastive = True
     if model_type.lower() == 'cnn':
         return CellClassifierCNN(**kwargs)
     elif model_type.lower() == 'resnet':
-        return CellClassifierResNet(**kwargs)
+        if contrastive:
+            return CellClassifierResNetFeatureExtractor(**kwargs)
+        else:
+            return CellClassifierResNet(**kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 

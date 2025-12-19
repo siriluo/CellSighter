@@ -88,7 +88,52 @@ class Trainer:
         self.best_val_acc = 0.0
         self.best_val_f1 = 0.0
         self.best_epoch = 0
-    
+
+        self.pos_bin_label = 7
+
+
+    def get_multiclass_ct_name(self, label):
+
+        new_mapping = {
+            0: "CD4+ T",
+            1: "CD8+ T",
+            2: "Treg",
+            3: "B cells",
+            4: "NK Cells",
+            5: "Dendritic Cells",
+            6: "Monocytes / Macrophages",
+            7: "Stromal Cells",
+            8: "Smooth Muscle",
+            9: "Tumor Cells",
+            10: "Vasculature",
+            11: "Granulocytes",
+            # 0: "CD4+ T",
+            # 1: "CD8+ T",
+            # 2: "Treg",
+            # 3: "B cells",
+            # 4: "Monocytes / Macrophages",
+            # 5: "Stromal Cells",
+            # 6: "Smooth Muscle",
+            # 7: "Tumor Cells",
+            # 8: "Vasculature",
+            # 9: "Granulocytes",
+        }
+
+        class_name = new_mapping[label]
+
+        return class_name
+
+
+    def convert_to_binary_label(self, labels, positive_label=0):
+        new_labels = labels.clone()
+
+        new_labels[labels != positive_label] = 0
+        
+        new_labels[labels == positive_label] = 1
+
+        return new_labels 
+
+
     def train_epoch(self, epoch: int) -> Tuple[float, float]:
         """
         Train the model for one epoch.
@@ -118,7 +163,12 @@ class Trainer:
             images = images.to(self.device)
             
             # Convert labels to binary (0: non-tumor, 1: tumor)
-            long_labels = labels.long() # (labels > 0)
+            # If
+            if self.num_classes > 2:
+                long_labels = labels.long() # (labels > 0)
+            else:
+                new_bin_labels = self.convert_to_binary_label(labels=labels, positive_label=self.pos_bin_label) # 
+                long_labels = (new_bin_labels).long()
             
             # Zero gradients
             self.optimizer.zero_grad()
@@ -181,7 +231,11 @@ class Trainer:
 
                 # Convert labels to binary
                 # binary_labels = (labels > 0).long()
-                long_labels = labels.long() # (labels > 0)
+                if self.num_classes > 2:
+                    long_labels = labels.long() # (labels > 0)
+                else:
+                    new_bin_labels = self.convert_to_binary_label(labels=labels, positive_label=self.pos_bin_label) # , positive_label=0
+                    long_labels = (new_bin_labels).long()
 
                 # Forward pass
                 outputs = self.model(images)
@@ -480,6 +534,10 @@ class Trainer:
         all_labels = []
         all_probs = []
         
+
+        bin_pos_label = self.pos_bin_label
+        bin_ct_name = self.get_multiclass_ct_name(bin_pos_label)
+
         with torch.no_grad():
             for batch in test_loader:
                 images = batch['image'] #.to(self.device)
@@ -491,7 +549,11 @@ class Trainer:
                 images = images.to(self.device)
                 
                 # Convert labels to binary
-                long_labels = labels.long() # (labels > 0)  
+                if self.num_classes > 2:
+                    long_labels = labels.long() # (labels > 0)
+                else:
+                    new_bin_labels = self.convert_to_binary_label(labels=labels, positive_label=bin_pos_label) # , =0
+                    long_labels = (new_bin_labels).long()
 
                 # Forward pass
                 outputs = self.model(images)
@@ -510,10 +572,6 @@ class Trainer:
                     all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
                 else:
                     all_probs.append(probs.cpu().numpy())
-        
-        outputs = self.model.avgpool(images)
-        # features = outputs.pooler_output.squeeze()
-        print(outputs.cpu().squeeze().numpy().shape)
 
         # Calculate metrics
         accuracy = accuracy_score(all_labels, all_preds)
@@ -560,7 +618,7 @@ class Trainer:
             'f1_avg': f1_avg,
             'auc': auc,
             'confusion_matrix': cm.tolist(),
-            'class_names': ['Non-tumor', 'Tumor']
+            'class_names': [f'Non-{bin_ct_name}', f'{bin_ct_name}']
         }
 
         if self.num_classes > 2:

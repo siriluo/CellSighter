@@ -21,54 +21,20 @@ sys.path.insert(0, str(src_dir))
 # Local imports
 from models import create_model, get_model_info
 from contrastive_learn_add import ContrastiveModel, ProjectionHead, ClassificationHead
+from gat_model import GATv2ClassificationHead
 from contrastive_trainer import ContrastiveTrainer
-from evaluation_metrics import ConClassEvaluator
+from contrastive_classifier_trainer import ConClassTrainer
+from contrastive_gat_classifier_trainer import ConClassGraphTrainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
 from data.data import CellCropsDataset
-from train import load_config, create_data_loaders, calculate_class_weights
+from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from util.utils import TwoCropTransform
 
 
-use_mask = False # False set to true if you want to include the mask info
+use_mask = True # False set to true if you want to include the mask info
 cifar = False
 
-
-def get_multiclass_ct_name(label, num_classes: int) -> str:
-
-    if num_classes == 10:
-        new_mapping = {
-            0: "CD4+ T",
-            1: "CD8+ T",
-            2: "Treg",
-            3: "B cells",
-            4: "Monocytes / Macrophages",
-            5: "Stromal Cells",
-            6: "Smooth Muscle",
-            7: "Tumor Cells",
-            8: "Vasculature",
-            9: "Granulocytes",
-        }
-    else:
-        new_mapping = {
-            0: "CD4+ T",
-            1: "CD8+ T",
-            2: "Treg",
-            3: "B cells",
-            4: "NK Cells",
-            5: "Dendritic Cells",
-            6: "Monocytes / Macrophages",
-            7: "Stromal Cells",
-            8: "Smooth Muscle",
-            9: "Tumor Cells",
-            10: "Vasculature",
-            11: "Granulocytes",
-        }
-
-
-    class_name = new_mapping[label]
-
-    return class_name
 
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet') -> nn.Module:
@@ -100,17 +66,21 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
                     weight_decay=1e-4)
     print("SGD")
     
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=config.get('lr_step_size', 30), # 10 20
-        gamma=config.get('lr_gamma', 0.1)  #  0.5
+    # # Learning rate scheduler
+    # scheduler = optim.lr_scheduler.StepLR(
+    #     optimizer,
+    #     step_size=config.get('lr_step_size', 40), # 10 20
+    #     gamma=config.get('lr_gamma', 0.1)  #  0.5
+    # )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=config.get('epoch_max', 100), eta_min=1e-6
     )
     
     return optimizer, scheduler
 
 
-def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str, num_classes: int):
+def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     """Print statistics about the dataset."""
     print(f"\n{dataset_name} Dataset Statistics:")
     print(f"Total samples: {len(dataset)}")
@@ -128,7 +98,7 @@ def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str, num_classe
     
     print(f"Class distribution:")
     for label, count in zip(unique, counts):
-        class_name = get_multiclass_ct_name(label, num_classes) # "Tumor" if label == 1 else "Non-tumor"
+        class_name = get_multiclass_ct_name(label) # "Tumor" if label == 1 else "Non-tumor"
         percentage = (count / len(labels)) * 100
         print(f"  {class_name} (label {label}): {count} samples ({percentage:.1f}%)")
     
@@ -192,9 +162,9 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     train_crops = load_samples(config, config['train_set'])
     print(f"Loaded {len(train_crops)} training samples")
     
-    print("Loading test data...")
-    val_crops = load_samples(config, config['test_set'])
-    print(f"Loaded {len(val_crops)} test samples")
+    print("Loading validation data...")
+    val_crops = load_samples(config, config['val_set'])
+    print(f"Loaded {len(val_crops)} validation samples")
     
     # Create transforms
     if config.get('aug', False):
@@ -242,8 +212,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         )
     
     # Print dataset statistics
-    # print_dataset_stats(train_dataset, "Training")
-    print_dataset_stats(val_dataset, "Validation", config['num_classes'])
+    print_dataset_stats(train_dataset, "Training")
+    print_dataset_stats(val_dataset, "Validation")
     
     # Create data loaders
 
@@ -268,19 +238,27 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
                                     transform=TwoCropTransform(train_transform),
                                     download=True)
     
-
-    train_loader = None 
-    # DataLoader(
-    #     train_dataset,
-    #     batch_size=config['batch_size'],
-    #     shuffle=True,
-    #     num_workers=config['num_workers'],
-    #     pin_memory=True if torch.cuda.is_available() else False
-    # )
+    use_graph = config.get('graph', False)
+    if not use_graph:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['batch_size'],
+            shuffle=True,
+            num_workers=config['num_workers'],
+            pin_memory=True if torch.cuda.is_available() else False
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['batch_size'],
+            shuffle=False,
+            num_workers=config['num_workers'],
+            pin_memory=True if torch.cuda.is_available() else False
+        ) 
     
     val_loader = DataLoader(
         val_dataset,
-        batch_size=1, #   config['batch_size']
+        batch_size=config['batch_size'], #  1
         shuffle=False,
         num_workers=config['num_workers'],
         pin_memory=True if torch.cuda.is_available() else False
@@ -314,9 +292,9 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create data loaders
     if (not cifar) or (not args.classifier):
-        train_loader, test_loader = create_contrastive_data_loaders(config)
+        train_loader, val_loader = create_contrastive_data_loaders(config)
     else:
-        train_loader, test_loader = set_loader(config)
+        train_loader, val_loader = set_loader(config)
     # Get input channels from a sample
     # sample_batch = next(iter(train_loader))
 
@@ -347,7 +325,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.2,
+        'dropout_rate': 0.7,
         'name': 'resnet50',
     }
     model = create_contrastive_model(
@@ -356,18 +334,16 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         classification_head_kwargs=classification_head_kwargs,
         model_type=model_type
     )
-    # model = create_model(
-    #     model_type=model_type,
-    #     input_channels=input_channels,
-    #     num_classes=config['num_classes'],
-    #     dropout_rate=config.get('dropout_rate', 0.3)
-    # )
 
     if args.classifier:
-        classifier = ClassificationHead(**classification_head_kwargs)
-        state_dict = torch.load(config['class_path'])
-        classifier.load_state_dict(state_dict['model_state_dict'])
-        print("Loaded classifier weights from checkpoint")
+        use_graph = config.get('graph', False)
+        if not use_graph:
+            classifier = ClassificationHead(**classification_head_kwargs)
+        else:
+            classifier = GATv2ClassificationHead(**classification_head_kwargs)
+        # state_dict = torch.load('/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_mask_test_aug/best_model.pth')
+        # classifier.load_state_dict(state_dict['model_state_dict'])
+        # print("Loaded classifier weights from checkpoint")
 
     # Print model information
     model_info = get_model_info(model)
@@ -377,13 +353,13 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
     # Calculate class weights for balanced training
-    # class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
+    class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
     if not args.classifier:
         criterion = SupConLoss(temperature=0.1) # try default 0.07 #  temperature=0.07 25
     else:
-        criterion = nn.CrossEntropyLoss() # weight=class_weights
+        criterion = nn.CrossEntropyLoss(weight=class_weights) # 
     
     # Create optimizer and scheduler
     if not args.classifier:
@@ -402,27 +378,85 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Configuration saved to {config_save_path}")
     
     # Create trainer
-    evaluator = ConClassEvaluator(
-        model=model,
-        encoder_ckpt_path=config["ckpt_path"],
-        classifier=classifier,
-        train_loader=train_loader,
-        val_loader=test_loader,
-        criterion=criterion,
-        optimizer=optimizer,
-        num_classes=config['num_classes'],
-        scheduler=scheduler,
-        device=device,
-        save_dir=save_dir,
-        log_interval=config.get('log_interval', 50),
-        args=args
-    )
+    if not args.classifier:
+        trainer = ContrastiveTrainer(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_classes=config['num_classes'],
+            scheduler=scheduler,
+            device=device,
+            save_dir=save_dir,
+            log_interval=config.get('log_interval', 50),
+            args=args
+        )
+    else:
+        use_graph = config.get('graph', False)
+        if not use_graph:
+            trainer = ConClassTrainer(
+                model=model,
+                encoder_ckpt_path=config["ckpt_path"],
+                classifier=classifier,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                criterion=criterion,
+                optimizer=optimizer,
+                num_classes=config['num_classes'],
+                scheduler=scheduler,
+                device=device,
+                save_dir=save_dir,
+                log_interval=config.get('log_interval', 50),
+                args=args
+            )
+        else:
+            trainer = ConClassGraphTrainer(
+                model=model,
+                encoder_ckpt_path=config["ckpt_path"],
+                classifier=classifier,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                criterion=criterion,
+                optimizer=optimizer,
+                num_classes=config['num_classes'],
+                scheduler=scheduler,
+                device=device,
+                save_dir=save_dir,
+                log_interval=config.get('log_interval', 50),
+                args=args
+            )
+    
+    # Resume from checkpoint if specified
+    start_epoch = 0
+    if resume_checkpoint:
+        if os.path.exists(resume_checkpoint):
+            start_epoch = trainer.load_checkpoint(resume_checkpoint)
+            print(f"Resumed training from epoch {start_epoch}")
+        else:
+            print(f"Checkpoint not found: {resume_checkpoint}")
 
+    # history = {}
+    # eval_results = {}
+
+    # trainer.debug_gat()
+    
+    # Train the model
+    print(f"\nStarting training...")
+    print()
+    history = trainer.train(
+        num_epochs=config['epoch_max'],
+        early_stopping_patience=config.get('early_stopping_patience', 20)
+    )
+    
+    # Plot training curves
+    plot_save_path = os.path.join(save_dir, 'training_curves.png')
+    trainer.plot_training_curves(save_path=plot_save_path)
     
     eval_results = {}
     # Detailed evaluation
     print("\nPerforming detailed evaluation...")
-    eval_results = evaluator.evaluate_detailed()
+    eval_results = trainer.evaluate_detailed()
     
     # Save evaluation results
     eval_save_path = os.path.join(save_dir, 'evaluation_results.json')
@@ -432,7 +466,14 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Print final results
     print(f"\n{'='*60}")
-    print("EVALUATION COMPLETED")
+    print("TRAINING COMPLETED")
+    print(f"{'='*60}")
+    # print(f"Best validation F1 score: {trainer.best_val_f1:.4f}")
+    # print(f"Best validation accuracy: {trainer.best_val_acc:.4f}")
+    print(f"Best epoch: {trainer.best_epoch}")
+    # print(f"Final evaluation accuracy: {eval_results['accuracy']:.4f}")
+    # print(f"Final evaluation F1 score: {eval_results['f1_avg']:.4f}")
+    # print(f"Final evaluation AUC: {eval_results['auc']:.4f}")
     
     # print(f"\nConfusion Matrix:")
 
@@ -446,4 +487,4 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"\nModel and results saved to: {save_dir}")
     print(f"Best model: {os.path.join(save_dir, 'best_model.pth')}")
     
-    return eval_results
+    return trainer, history, eval_results

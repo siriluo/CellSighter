@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
+"""
+train_classifier.py - Main Entry Point for Cell Classification Training
 
+This script provides a simple interface to train the binary cell classification model.
+It handles command-line arguments and calls the main training pipeline.
+
+Usage:
+    python train_classifier.py                    # Use default settings
+    python train_classifier.py --model resnet     # Use ResNet architecture
+    python train_classifier.py --config custom_config.json  # Use custom config
+    python train_classifier.py --resume checkpoints/best_model.pth  # Resume training
+"""
+
+import json
+import math
 import os
 import sys
 import argparse
-import json
-import math
 from pathlib import Path
 
 # Add src to Python path for imports
 src_dir = Path(__file__).parent / 'src'
 sys.path.insert(0, str(src_dir))
 
-from evaluate import main as eval_main
+# Import the main training function
+from contrastive_runner import main as train_main
+
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -51,7 +65,7 @@ Examples:
     parser.add_argument('--lr', type=float, default=None,
                        help='Learning rate (overrides config)')
     
-    parser.add_argument('--lr_decay_rate', type=float, default=0.1,
+    parser.add_argument('--lr_decay_rate', type=float, default=0.2,
                         help='decay rate for learning rate')
     
     parser.add_argument('--weight_decay', type=float, default=1e-4,
@@ -130,7 +144,7 @@ def validate_arguments(args):
 
 def update_config_from_args(config_path, args):
     """Update configuration with command line arguments."""
-    import json
+    # import json
     
     # Load existing config
     with open(config_path, 'r') as f:
@@ -169,7 +183,7 @@ def update_config_from_args(config_path, args):
     
     # Set default save directory if not specified
     if 'save_dir' not in config:
-        config['save_dir'] = './eval_metrics'
+        config['save_dir'] = './contrastive_checkpoints'
     
     # Save updated config to temporary file
     temp_config_path = 'temp_config.json'
@@ -177,6 +191,32 @@ def update_config_from_args(config_path, args):
         json.dump(config, f, indent=2)
     
     return temp_config_path
+
+
+def print_training_info(args, config_path):
+    """Print training information."""
+    import json
+    
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    print("=" * 60)
+    print("CELL CLASSIFICATION TRAINING")
+    print("=" * 60)
+    print(f"Model architecture: {args.model.upper()}")
+    print(f"Configuration file: {args.config}")
+    print(f"Training epochs: {config['epoch_max']}")
+    print(f"Batch size: {config['batch_size']}")
+    print(f"Learning rate: {config['lr']}")
+    print(f"Data augmentation: {'Enabled' if config.get('aug', False) else 'Disabled'}")
+    print(f"Save directory: {config['save_dir']}")
+    
+    if args.resume:
+        print(f"Resuming from: {args.resume}")
+    
+    print(f"Training images: {len(config['train_set'])}")
+    print(f"Validation images: {len(config['val_set'])}")
+    print("=" * 60)
 
 
 def main():
@@ -191,7 +231,13 @@ def main():
     temp_config_path = update_config_from_args(args.config, args)
     
     try:
+        # Print training information
+        if args.verbose:
+            print_training_info(args, temp_config_path)
         
+        with open(temp_config_path, 'r') as f:
+            config = json.load(f)
+
         # Set device environment variable if specified
         if args.device != 'auto':
             if args.device == 'cpu':
@@ -201,14 +247,23 @@ def main():
                 pass
         
         # Run training
-        eval_results = eval_main(
+        print("Starting training...")
+        args.learning_rate = config["lr"]
+        trainer, history, eval_results = train_main(
             config_path=temp_config_path,
             model_type=args.model,
             resume_checkpoint=args.resume,
-            args=args,
+            args=args
         )
-
-
+        
+        print("\n" + "=" * 60)
+        print("TRAINING COMPLETED SUCCESSFULLY!")
+        print("=" * 60)
+        
+        # Print summary
+        print(f"Best F1 Score: {trainer.best_val_f1:.4f}")
+        print(f"Best Accuracy: {trainer.best_val_acc:.4f}")
+        # print(f"Final AUC: {eval_results['auc']:.4f}")
         
         # Clean up temporary config
         if os.path.exists(temp_config_path):
@@ -236,6 +291,3 @@ def main():
 if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)
-
-
-

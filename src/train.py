@@ -33,6 +33,16 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
+def convert_to_binary_label(labels, positive_label=0):
+    new_labels = labels.clone()
+
+    new_labels[labels != positive_label] = 0
+    
+    new_labels[labels == positive_label] = 1
+
+    return new_labels 
+
+
 def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
@@ -51,7 +61,7 @@ def create_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]
     val_crops = load_samples(config, config['val_set'])
     print(f"Loaded {len(val_crops)} validation samples")
     
-    use_mask = True
+    use_mask = False
 
     # Create transforms
     if config.get('aug', False):
@@ -119,6 +129,16 @@ def get_multiclass_ct_name(label):
         9: "Tumor Cells",
         10: "Vasculature",
         11: "Granulocytes",
+        # 0: "CD4+ T",
+        # 1: "CD8+ T",
+        # 2: "Treg",
+        # 3: "B cells",
+        # 4: "Monocytes / Macrophages",
+        # 5: "Stromal Cells",
+        # 6: "Smooth Muscle",
+        # 7: "Tumor Cells",
+        # 8: "Vasculature",
+        # 9: "Granulocytes",
     }
 
     class_name = new_mapping[label]
@@ -154,7 +174,7 @@ def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     print(f"Image dtype: {sample_image.dtype}")
 
 
-def calculate_class_weights(train_loader: DataLoader, device: str) -> torch.Tensor:
+def calculate_class_weights(train_loader: DataLoader, num_classes: int, device: str) -> torch.Tensor:
     """Calculate class weights for balanced training."""
     print("Calculating class weights...")
     
@@ -162,19 +182,28 @@ def calculate_class_weights(train_loader: DataLoader, device: str) -> torch.Tens
     for batch in train_loader:
         labels = batch['label']
         # binary_labels = (labels > 0).long()
-        long_labels = labels.long() # (labels > 0)
+
+        if num_classes > 2:
+            long_labels = labels.long() # (labels > 0)
+        else:
+            new_bin_labels = convert_to_binary_label(labels=labels, positive_label=7) # 
+            long_labels = (new_bin_labels).long()
+
         all_labels.extend(long_labels.numpy())
     
+    print(np.unique(all_labels))
     all_labels = np.array(all_labels)
     class_weights = compute_class_weight(
         'balanced',
-        classes=np.unique(all_labels),
+        classes=np.unique(all_labels), # np.unique(all_labels)
         y=all_labels
     )
     
     weights_tensor = torch.tensor(class_weights, dtype=torch.float32, device=device)
     
-    print(f"Class weights: Non-tumor={weights_tensor[0]:.3f}, Tumor={weights_tensor[1]:.3f}")
+    array_str = np.array2string(weights_tensor.cpu().numpy(), precision=3, separator=', ')
+
+    print(f"Class weights: {list(array_str)}") # Non-tumor= , Tumor={weights_tensor[1]:.3f}
     return weights_tensor
 
 
@@ -184,7 +213,7 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     optimizer = optim.Adam(
         model.parameters(),
         lr=config['lr'],
-        weight_decay=config.get('weight_decay', 1e-5)
+        weight_decay=config.get('weight_decay', 1e-4) #  1e-5
     )
     
     # Learning rate scheduler
@@ -224,7 +253,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Get input channels from a sample
     sample_batch = next(iter(train_loader))
-    input_channels = 5 # sample_batch['image'].shape[1] # 
+    input_channels = sample_batch['image'].shape[1] #  5 #
     print(f"Input channels: {input_channels}")
     
     # Create model
@@ -243,7 +272,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
     # Calculate class weights for balanced training
-    class_weights = calculate_class_weights(train_loader, device)
+    class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
     criterion = nn.CrossEntropyLoss(weight=class_weights)

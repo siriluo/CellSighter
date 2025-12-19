@@ -25,7 +25,8 @@ class CellCropsDataset(Dataset):
     def __init__(self,
                  crops: List[CellCrop],
                  transform: Optional[Callable] = None,
-                 mask: bool = False):
+                 mask: bool = False,
+                 contrastive: bool = False,):
         """
         Initialize the dataset.
         
@@ -38,6 +39,7 @@ class CellCropsDataset(Dataset):
         self._crops = crops
         self._transform = transform
         self._mask = mask
+        self.contrastive = contrastive  # Set to True for contrastive learning
 
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
@@ -60,6 +62,11 @@ class CellCropsDataset(Dataset):
         sample = self._crops[idx].sample(self._mask)
         # print("break?")
 
+        num_cell_samples = len(sample['image']) if isinstance(sample['image'], list) else 1
+        # print(f"num_cell_samples: {num_cell_samples}")
+
+        # see if I can construct an adjacency matrix here too?
+
         if self._mask:
             # Stack image with masks
             stacked = np.dstack([
@@ -70,17 +77,22 @@ class CellCropsDataset(Dataset):
             
             # Apply transforms
             if self._transform:
-                transformed = self._transform(stacked).float()
+                transformed = self._transform(stacked) # .float()
                 
                 # Split back into image and mask
-                sample['image'] = transformed[:-1, :, :]
-                sample['mask'] = transformed[[-1], :, :]
+                if self.contrastive:
+                    # For contrastive learning, return combined tensor
+                    sample['image'] = [transformed[0][:-1, :, :], transformed[1][:-1, :, :]]
+                    sample['mask'] = [transformed[0][[-1], :, :], transformed[1][[-1], :, :]]
+                else:
+                    sample['image'] = transformed[:-1, :, :]
+                    sample['mask'] = transformed[[-1], :, :]
         else:
             # Just transform the image if no mask needed
             if self._transform:
                 # print("breaking point")
                 # print(sample['image'].shape)
                 # print(self._transform(np.dstack([sample['image']])).float().shape)
-                sample['image'] = self._transform(np.dstack([sample['image']])).float()
+                sample['image'] = self._transform(np.dstack([sample['image']])) # [image, image] for TwoCropTransform
         
         return sample

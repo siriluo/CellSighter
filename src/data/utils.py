@@ -15,6 +15,7 @@ import torch
 from typing import List, Tuple, Dict, Any, Optional, Callable
 from torchvision.transforms import Lambda
 import cv2
+import pandas as pd
 
 
 class CellCrop:
@@ -28,7 +29,8 @@ class CellCrop:
                  label: int,
                  slices: Tuple[slice, ...],
                  cells: np.ndarray,
-                 image: np.ndarray):
+                 image: np.ndarray,
+                 coords_path: str = None):
         """Initialize a CellCrop instance."""
         self._cell_id = cell_id
         self._image_id = image_id
@@ -36,6 +38,15 @@ class CellCrop:
         self._slices = slices
         self._cells = cells
         self._image = image
+        self._coordinates = None  # Placeholder for coordinates if needed
+        # if coords_path, then access the coordinates located there, and grab the corresponding coordinates from 
+        # the right image and right cell_id. Should be path/to/coords/{image_id}_cell_info.csv
+        if coords_path:
+            coordinates_df = pd.read_csv(coords_path)
+            y = coordinates_df["Y"].values # 'centroid-0' y_coord_scaled
+            x = coordinates_df["X"].values # 'centroid-1' x_coord_scaled\
+            cts = coordinates_df["CellType"].values
+            self._coordinates = np.array([y[self._cell_id - 1], x[self._cell_id - 1]]) # format of i, j
 
     def sample(self, mask: bool = False) -> Dict[str, Any]:
         """Extract a sample of the cell region with optional masks."""
@@ -47,7 +58,8 @@ class CellCrop:
             'slice_y_start': self._slices[1].start,
             'slice_x_end': self._slices[0].stop,
             'slice_y_end': self._slices[1].stop,
-            'label': np.array(self._label, dtype=np.longlong)
+            'label': np.array(self._label, dtype=np.longlong),
+            'coordinates': self._coordinates,
         }
         
         if mask:
@@ -141,6 +153,9 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
             torchvision.transforms.CenterCrop((crop_size, crop_size)),
             torchvision.transforms.RandomHorizontalFlip(p=0.75),
             torchvision.transforms.RandomVerticalFlip(p=0.75),
+            # torchvision.transforms.RandomApply([
+            #     torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+            # ], p=0.8),
         ])
 
 
@@ -196,6 +211,8 @@ def create_slices(slices, crop_size, bounds):
     Returns:
         A tuple of adjusted slices that fit within bounds.
     """
+
+    # Modify code to use different crop sizes for extracting from image and when augmenting image
     new_slices = []
     for slc, cs, max_size in zip(slices, crop_size, bounds):
         current_size = slc.stop - slc.start
@@ -243,12 +260,15 @@ def load_samples(config, images_names) -> Tuple[List[CellCrop], List[List[int]]]
             cells_path=cells_path,
             cells2labels_path=cells2labels_path,
             to_pad=config['to_pad'],
-            crop_size=config['crop_size']
+            crop_size=config['crop_size'] # Try using crop_input_size here later?
         )
         
         # Process each cell
+        # add option to use cell coordinates instead of finding objects
         objs = ndimage.find_objects(cells)
         
+        coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv"
+
         for cell_id, obj in enumerate(objs, 1):
             if obj is None: continue
             
@@ -257,10 +277,11 @@ def load_samples(config, images_names) -> Tuple[List[CellCrop], List[List[int]]]
 
             crops.append(
                     CellCrop(cell_id=cell_id,
-                             image_id=image_id,
-                             label=label,
-                             slices=slices,
-                             cells=cells,
-                             image=image))
+                            image_id=image_id,
+                            label=label,
+                            slices=slices,
+                            cells=cells,
+                            image=image,
+                            coords_path=coords_crc_path))
     
     return crops
