@@ -16,12 +16,13 @@ class GraphDataConstructor:
 
         self.coord_path = "/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed"
     
-    def extract_embeddings(self, dataloader):
+    def extract_embeddings(self, dataloader, use_encoder=True):
         """
         Extract embeddings from all samples using upstream model.
         
         Args:
             dataloader: DataLoader containing your raw data (images, text, etc.)
+            use_encoder: Whether to get the embeddings of only the encoder or encoder + projection head
             
         Returns:
             embeddings: [num_nodes, embedding_dim]
@@ -49,7 +50,10 @@ class GraphDataConstructor:
                 images = images.cuda(non_blocking=True)
 
                 # Extract embeddings
-                feat = self.embedding_model.encoder(images)
+                if use_encoder:
+                    feat = self.embedding_model.encoder(images)
+                else:
+                    _, _, feat = self.embedding_model(images)
 
                 # mock cell sample coordinates? actual centroid coords vs detected cell coords from crop
                 image_name = batch["image_id"][0]

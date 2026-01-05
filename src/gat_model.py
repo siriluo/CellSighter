@@ -16,6 +16,7 @@ model_dict = {
     'resnet34': [512],
     'resnet50': [2048],
     'resnet101': [2048],
+    'convnextv2_tiny': [768],
 }
     
 

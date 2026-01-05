@@ -160,3 +160,5 @@ ct_class_training_job_nonbin.sbatch
 ct_class_training_job.sbatch
 ct_class_training_job.sbatch
 ct_class_training_job.sbatch
+ct_class_training_job_nonbin_con_classifier_cifar.sbatch
+ct_class_training_job_nonbin_contrastive_cifar.sbatch

@@ -209,15 +209,21 @@ class ContrastiveTrainer:
         for idx, batch in enumerate(train_loader):
         # for idx, (images, labels) in enumerate(train_loader):
             data_time.update(time.time() - end)
-            images = batch['image'] # .to(self.device) [2, B, C, H, W]
-            labels = batch['label'] #.to(self.device)
+
+            if self.args.cifar == False:
+                images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                labels = batch['label'] #.to(self.device) [1]
+            else:
+                images = batch[0]
+                labels = batch[1]
 
             # Code to append mask dimensions
             # for images[0] and images[1], append m[0] and m[1] respectively along channel dimension
-            m = batch.get('mask', None)
-            if m is not None:
-                images[0] = torch.cat([images[0], m[0]], dim=1)
-                images[1] = torch.cat([images[1], m[1]], dim=1)
+            if self.args.cifar == False:
+                m = batch.get('mask', None)
+                if m is not None:
+                    images[0] = torch.cat([images[0], m[0]], dim=1)
+                    images[1] = torch.cat([images[1], m[1]], dim=1)
 
             images_new = torch.cat([images[0], images[1]], dim=0) 
             if torch.cuda.is_available():
@@ -280,13 +286,19 @@ class ContrastiveTrainer:
         
         with torch.no_grad():
             for idx, batch in enumerate(self.val_loader):
-                images = batch['image'] #.to(self.device)
-                labels = batch['label'] #.to(self.device)
+                if self.args.cifar == False:
+                    images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                    labels = batch['label'] #.to(self.device) [1]
+                else:
+                    images = batch[0]
+                    labels = batch[1]
                 
-                m = batch.get('mask', None)
-                if m is not None:
-                    images[0] = torch.cat([images[0], m[0]], dim=1)
-                    images[1] = torch.cat([images[1], m[1]], dim=1)
+                if self.args.cifar == False:
+                    m = batch.get('mask', None)
+                    if m is not None:
+                        images[0] = torch.cat([images[0], m[0]], dim=1)
+                        images[1] = torch.cat([images[1], m[1]], dim=1)
+                    
                 images = images #.to(self.device)
 
                 images_new = torch.cat([images[0], images[1]], dim=0) #.unsqueeze(0)
@@ -425,13 +437,18 @@ class ContrastiveTrainer:
 
         with torch.no_grad():
             for idx, batch in enumerate(self.val_loader):
-                images = batch['image'] #.to(self.device)
-                labels = batch['label'] #.to(self.device)
+                if self.args.cifar == False:
+                    images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                    labels = batch['label'] #.to(self.device) [1]
+                else:
+                    images = batch[0]
+                    labels = batch[1]
                 
-                m = batch.get('mask', None)
-                if m is not None:
-                    images[0] = torch.cat([images[0], m[0]], dim=1)
-                    images[1] = torch.cat([images[1], m[1]], dim=1)
+                if self.args.cifar == False:
+                    m = batch.get('mask', None)
+                    if m is not None:
+                        images[0] = torch.cat([images[0], m[0]], dim=1)
+                        images[1] = torch.cat([images[1], m[1]], dim=1)
                 images = images #.to(self.device)
 
                 images_new = torch.cat([images[0], images[1]], dim=0) #.unsqueeze(0)

@@ -41,6 +41,8 @@ class CellCropsDataset(Dataset):
         self._mask = mask
         self.contrastive = contrastive  # Set to True for contrastive learning
 
+        self._labels = [self._crops[i]._label for i in range(len(self._crops))]
+
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
         return len(self._crops)
@@ -69,6 +71,7 @@ class CellCropsDataset(Dataset):
 
         if self._mask:
             # Stack image with masks
+            # consider only adding the single mask displaying the cell of interest
             stacked = np.dstack([
                 sample['image'],
                 sample['all_cells_mask'][:, :, np.newaxis],

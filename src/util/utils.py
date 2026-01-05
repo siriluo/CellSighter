@@ -52,16 +52,28 @@ def accuracy(output, target, topk=(1,)):
 
 def adjust_learning_rate(args, optimizer, epoch):
     lr = args.learning_rate # 0.5 # 
+    lr_p = args.learning_rate_p
     if args.cosine:
         eta_min = lr * (1e-4 ** 3) # args.lr_decay_rate
         lr = eta_min + (lr - eta_min) * (
+                1 + math.cos(math.pi * epoch / 200)) / 2 # args.epochs
+        
+        eta_min_p = lr_p * (1e-4 ** 3) # args.lr_decay_rate
+        lr_p = eta_min_p + (lr_p - eta_min_p) * (
                 1 + math.cos(math.pi * epoch / 200)) / 2 # args.epochs
     else:
         steps = np.sum(epoch > np.asarray(args.lr_decay_epochs))
         if steps > 0:
             lr = lr * (args.lr_decay_rate ** steps)
+            lr_p = lr_p * (args.lr_decay_rate ** steps)
 
     for param_group in optimizer.param_groups:
+        # if param_group['name'] == 'encoder':
+        #     param_group['lr'] = lr
+        # if param_group.get('name', 'empty') == 'projection_head':
+        #     param_group['lr'] = lr_p
+        # else:
+        #     param_group['lr'] = lr
         param_group['lr'] = lr
 
 
@@ -72,6 +84,13 @@ def warmup_learning_rate(args, epoch, batch_id, total_batches, optimizer):
         lr = args.warmup_from + p * (args.warmup_to - args.warmup_from)
 
         for param_group in optimizer.param_groups:
+            # if param_group['name'] == 'encoder':
+            #     lr = args.warmup_from + p * (args.warmup_to - args.warmup_from)
+            # if param_group.get('name', 'empty') == 'projection_head':
+            #     lr = args.warmup_from + p * (args.warmup_to_p - args.warmup_from)
+            # else:
+            #     lr = args.warmup_from + p * (args.warmup_to - args.warmup_from)
+
             param_group['lr'] = lr
 
 

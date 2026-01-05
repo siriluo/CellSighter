@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from typing import Dict, Any, Optional, Union
 from models import create_model
 from gat_model import GraphAttentionLayer
+from convnext_model import convnextv2_tiny
 
 
 class BasicBlock(nn.Module):
@@ -159,6 +160,7 @@ model_dict = {
     'resnet34': [resnet34, 512],
     'resnet50': [resnet50, 2048],
     'resnet101': [resnet101, 2048],
+    'convnextv2_tiny': [convnextv2_tiny, 768],
 }
 
 
@@ -182,17 +184,13 @@ class SupConResNet(nn.Module):
         super(SupConResNet, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun(**kwargs)
-        # if head == 'linear':
-        #     self.head = nn.Linear(dim_in, feat_dim)
+
         # elif head == 'mlp':
         #     self.head = nn.Sequential(
         #         nn.Linear(dim_in, dim_in),
         #         nn.ReLU(inplace=True),
         #         nn.Linear(dim_in, feat_dim)
         #     )
-        # else:
-        #     raise NotImplementedError(
-        #         'head not supported: {}'.format(head))
 
     def forward(self, x):
         feat = self.encoder(x)
@@ -223,48 +221,42 @@ class SupConGraphResNet(nn.Module):
 
 # Set up the contrastive learning code separately from the regular training code.
 class ProjectionHead(nn.Module):    
-    # def __init__(self, input_dim: int, projection_dim: int = 128):
-    #     super(ProjectionHead, self).__init__()
-    #     self.fc1 = nn.Linear(input_dim, 512)
-    #     self.relu = nn.ReLU()
-    #     self.fc2 = nn.Linear(512, projection_dim)
     def __init__(self,
         feature_dims=(2048, 128),
         activation=nn.ReLU(),
-        normalize_output=True,
         # kernel_initializer=tf.random_normal_initializer(stddev=.01),
         # bias_initializer=tf.zeros_initializer(),
         use_batch_norm=False,
+        normalize_output=True,
     #    batch_norm_momentum=blocks.BATCH_NORM_MOMENTUM,
     #    use_batch_norm_beta=False,
     #    use_global_batch_norm=True,
         **kwargs):
         super(ProjectionHead, self).__init__(**kwargs)
 
-        # self.linear_layers = nn.ModuleList() # dense layers
         self.fc1 = nn.Linear(feature_dims[0], feature_dims[0])
         self.fc2 = nn.Linear(feature_dims[0], feature_dims[1])
         self.activation = activation
-        self.normalize_output = normalize_output
         self.batch_norm = use_batch_norm
+        self.dropout = nn.Dropout(p=0.1) if use_batch_norm else None
 
         if use_batch_norm:
             self.bn1 = nn.BatchNorm1d(feature_dims[0])
-            self.bn2 = nn.BatchNorm1d(feature_dims[1])
+            # self.bn2 = nn.BatchNorm1d(feature_dims[1])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         if self.batch_norm:
             x = self.bn1(x)
         x = self.activation(x)
+        if self.dropout:
+            x = self.dropout(x)
         x = self.fc2(x)
-        if self.batch_norm:
-            x = self.bn2(x)
+        # if self.batch_norm:
+        #     x = self.bn2(x)
 
         # Just use l2 normalization at the end.
-        if self.normalize_output:
-            x = F.normalize(x, dim=1)
-        # feat = F.normalize(self.head(feat), dim=1)
+        x = F.normalize(x, dim=1)
 
         return x
 
@@ -278,17 +270,8 @@ class ClassificationHead(nn.Module):
         **kwargs):
         super(ClassificationHead, self).__init__(**kwargs)
         _, feat_dim = model_dict[name]
-        # self.classifier = nn.Sequential(
-        #     nn.Dropout(dropout_rate),
-        #     nn.Linear(input_dim, 256),
-        #     nn.ReLU(inplace=True),
-        #     nn.Dropout(dropout_rate),
-        #     nn.Linear(256, num_classes)
-        # )
+
         self.classifier = nn.Sequential(
-            # nn.Dropout(dropout_rate),
-            # nn.Linear(input_dim, 256),
-            # nn.ReLU(inplace=True),
             nn.Dropout(dropout_rate),
             nn.Linear(feat_dim, num_classes)
         )
@@ -299,15 +282,15 @@ class ClassificationHead(nn.Module):
         return x
 
 
-class LinearClassifier(nn.Module):
-    """Linear classifier"""
-    def __init__(self, name='resnet50', num_classes=12):
-        super(LinearClassifier, self).__init__()
-        _, feat_dim = model_dict[name]
-        self.fc = nn.Linear(feat_dim, num_classes)
+# class LinearClassifier(nn.Module):
+#     """Linear classifier"""
+#     def __init__(self, name='resnet50', num_classes=12):
+#         super(LinearClassifier, self).__init__()
+#         _, feat_dim = model_dict[name]
+#         self.fc = nn.Linear(feat_dim, num_classes)
 
-    def forward(self, features):
-        return self.fc(features)
+#     def forward(self, features):
+#         return self.fc(features)
 
 
 class ContrastiveModel(nn.Module):
@@ -317,8 +300,10 @@ class ContrastiveModel(nn.Module):
                  projection_head_kwargs=None, 
                  classification_head_kwargs=None,
                  norm_proj_head_input=False,
-                 norm_class_head_input=False):
+                 norm_class_head_input=False,
+                 model_name='resnet18'):
         super(ContrastiveModel, self).__init__()
+
         self.norm_proj_head_input = norm_proj_head_input
         self.norm_class_head_input = norm_class_head_input
 
@@ -327,9 +312,13 @@ class ContrastiveModel(nn.Module):
         classification_head_kwargs = classification_head_kwargs or {}
 
         # self.encoder = create_model(**encoder_kwargs)
-        self.encoder = SupConResNet(name='resnet50', **encoder_kwargs)
+        if base_model == 'resnet':
+            self.encoder = SupConResNet(name=model_name, **encoder_kwargs) # resnet18 currently used resnet50, try out resnet18 next
+        elif base_model == 'convnext':
+            self.encoder = convnextv2_tiny(**encoder_kwargs) # the output features should have size (B, 768, 7, 7), so, just 768?
+        else:
+            raise ValueError(f'encoder model: {base_model} not recognized.')
         self.projection_head = ProjectionHead(**projection_head_kwargs)
-        # self.classification_head = ClassificationHead(**classification_head_kwargs) 
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -340,10 +329,6 @@ class ContrastiveModel(nn.Module):
         projection_in = normalized_embedding if self.norm_proj_head_input else feature_embedding
 
         projection_out = self.projection_head(projection_in)
-
-        # class_in = normalized_embedding if self.norm_class_head_input else feature_embedding
-
-        # class_out = self.classification_head(class_in)
 
         return feature_embedding, normalized_embedding, projection_out #, class_out
 

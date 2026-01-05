@@ -254,14 +254,19 @@ class ConClassTrainer:
         # for idx, (images, labels) in enumerate(train_loader):
             data_time.update(time.time() - end)
 
-            images = batch['image'] # .to(self.device) [2, B, C, H, W]
-            labels = batch['label'] #.to(self.device)
+            if self.args.cifar == False:
+                images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                labels = batch['label'] #.to(self.device) [1]
+            else:
+                images = batch[0]
+                labels = batch[1]
 
             # Code to append mask dimensions
             # for images[0] and images[1], append m[0] and m[1] respectively along channel dimension
-            m = batch.get('mask', None)
-            if m is not None:
-                images = torch.cat([images, m], dim=1)
+            if self.args.cifar == False:
+                m = batch.get('mask', None)
+                if m is not None:
+                    images = torch.cat([images, m], dim=1)
 
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
@@ -324,12 +329,17 @@ class ConClassTrainer:
         
         with torch.no_grad():
             for idx, batch in enumerate(self.val_loader):
-                images = batch['image'] #.to(self.device) [0] #
-                labels = batch['label'] #.to(self.device) [1] #
+                if self.args.cifar == False:
+                    images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                    labels = batch['label'] #.to(self.device) [1]
+                else:
+                    images = batch[0]
+                    labels = batch[1]
                 
-                m = batch.get('mask', None)
-                if m is not None:
-                    images = torch.cat([images, m], dim=1)
+                if self.args.cifar == False:
+                    m = batch.get('mask', None)
+                    if m is not None:
+                        images = torch.cat([images, m], dim=1)
 
                 images = images.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)
@@ -529,13 +539,18 @@ class ConClassTrainer:
         bin_ct_name = self.get_multiclass_ct_name(bin_pos_label)
 
         with torch.no_grad():
-            for idx, batch in enumerate(self.val_loader):
-                images = batch['image'] #.to(self.device) [0] #
-                labels = batch['label'] #.to(self.device) [1] #
+            for idx, batch in enumerate(test_loader):
+                if self.args.cifar == False:
+                    images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                    labels = batch['label'] #.to(self.device) [1]
+                else:
+                    images = batch[0]
+                    labels = batch[1]
                 
-                m = batch.get('mask', None)
-                if m is not None:
-                    images = torch.cat([images, m], dim=1)
+                if self.args.cifar == False:
+                    m = batch.get('mask', None)
+                    if m is not None:
+                        images = torch.cat([images, m], dim=1)
 
                 images = images.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)

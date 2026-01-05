@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from typing import Dict, Tuple, Any
 import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
@@ -28,6 +28,7 @@ from contrastive_gat_classifier_trainer import ConClassGraphTrainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
 from data.data import CellCropsDataset
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
+from data.custom_samplers import TwoStageBalancedSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from util.utils import TwoCropTransform
 
@@ -35,15 +36,22 @@ from util.utils import TwoCropTransform
 use_mask = True # False set to true if you want to include the mask info
 cifar = False
 
+model_dict = {
+    'resnet18': 512,
+    'resnet34': 512,
+    'resnet50': 2048,
+    'resnet101': 2048,
+    'convnextv2_tiny': 768,
+}
 
-
-def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet') -> nn.Module:
+def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
     model = ContrastiveModel(
         base_model=model_type,
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
         norm_proj_head_input=False,
+        model_name=model_name
     )
 
     return model
@@ -60,17 +68,31 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     #     )
     #     print("Adam")
     # else:
-    optimizer = optim.SGD(model.parameters(),
-                    lr=config['lr'],
-                    momentum=0.9,
-                    weight_decay=1e-4)
-    print("SGD")
-    
+
+    if config['classifier']:
+        optimizer = optim.SGD(model.parameters(),
+                        lr=config['lr'],
+                        momentum=0.9,
+                        weight_decay=1e-4)
+        print("SGD")
+    else:
+        ## Test optimizer with multiple LRs
+        # optimizer = optim.SGD([
+        #         {'params': model.encoder.parameters(), 'lr': config['lr'], 'name': 'encoder'},
+        #         {'params': model.projection_head.parameters(), 'lr': config['proj_lr'], "weight_decay": 0.0, 'name': 'projection_head'},],
+        #         momentum=0.9,
+        #         weight_decay=1e-4)
+        optimizer = optim.SGD(model.parameters(),
+                lr=config['lr'],
+                momentum=0.9,
+                weight_decay=1e-4)
+        print("SGD with different LRs")
+
     # # Learning rate scheduler
     # scheduler = optim.lr_scheduler.StepLR(
     #     optimizer,
     #     step_size=config.get('lr_step_size', 40), # 10 20
-    #     gamma=config.get('lr_gamma', 0.1)  #  0.5
+    #     gamma=config.get('lr_gamma', 0.2)  #  0.5
     # )
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -130,12 +152,18 @@ def set_loader(config: Dict[str, Any]):
     ])
 
 
-    train_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
+    cifar_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
                                         transform=train_transform,
                                         download=True)
-    val_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
+    test_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
                                     train=False,
                                     transform=val_transform)
+        
+    train_size = int(0.8 * len(cifar_dataset))
+    val_size = len(cifar_dataset) - train_size
+
+    RANDOM_SEED = 42 
+    train_dataset, val_dataset = random_split(cifar_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(RANDOM_SEED))
 
     train_sampler = None
     train_loader = torch.utils.data.DataLoader(
@@ -143,9 +171,12 @@ def set_loader(config: Dict[str, Any]):
         num_workers=config['num_workers'], pin_memory=True, sampler=train_sampler)
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=256, shuffle=False,
-        num_workers=8, pin_memory=True)
+        num_workers=config['num_workers'], pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=256, shuffle=False,
+        num_workers=config['num_workers'], pin_memory=True)
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
@@ -169,7 +200,7 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     # Create transforms
     if config.get('aug', False):
         train_transform = create_training_transform(
-            crop_size=config['crop_size'], # potentially replace with config['crop_input_size']
+            crop_size=config['crop_input_size'], # crop_input_size crop_size potentially replace with config['crop_input_size']
             shift=config.get('shift', 5),
             mask=use_mask,
         )
@@ -178,7 +209,7 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         train_transform = create_validation_transform(crop_size=config['crop_size'])
         print("No data augmentation applied")
     
-    val_transform = create_validation_transform(crop_size=config['crop_size'])
+    val_transform = create_validation_transform(crop_size=config['crop_input_size'])
 
     # no_op_transform = torchvision.transforms.Compose([
     #     torchvision.transforms.ToTensor(),
@@ -202,22 +233,25 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         train_dataset = CellCropsDataset(
             crops=train_crops,
             transform=TwoCropTransform(train_transform),
-            mask=use_mask  # Set to True if you want to include mask information
+            mask=use_mask,  # Set to True if you want to include mask information
+            contrastive=True,
         )
         
         val_dataset = CellCropsDataset(
             crops=val_crops,
-            transform=TwoCropTransform(val_transform),
-            mask=use_mask
+            transform=TwoCropTransform(val_transform), # train_transform val_transform
+            mask=use_mask,
+            contrastive=True,
         )
     
     # Print dataset statistics
     print_dataset_stats(train_dataset, "Training")
     print_dataset_stats(val_dataset, "Validation")
     
-    # Create data loaders
+    train_dataset_labels = train_dataset._labels
 
-    if cifar:
+    # Create data loaders
+    if config.get('cifar', False):
         mean = (0.4914, 0.4822, 0.4465)
         std = (0.2023, 0.1994, 0.2010)
 
@@ -234,16 +268,31 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
             normalize,
         ])
 
-        train_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
+        cifar_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
                                     transform=TwoCropTransform(train_transform),
                                     download=True)
+        
+        train_size = int(0.8 * len(cifar_dataset))
+        val_size = len(cifar_dataset) - train_size
+
+        RANDOM_SEED = 42 
+        train_dataset, val_dataset = random_split(cifar_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(RANDOM_SEED))
     
     use_graph = config.get('graph', False)
     if not use_graph:
+        # train_loader = DataLoader(
+        #     train_dataset,
+        #     batch_size=config['batch_size'],
+        #     # sampler=torch.utils.data.RandomSampler(train_dataset, num_samples=len(train_dataset), replacement=True),
+        #     shuffle=True,
+        #     num_workers=config['num_workers'],
+        #     pin_memory=True if torch.cuda.is_available() else False
+        # )
+
+        cust_sampler = TwoStageBalancedSampler(train_dataset_labels, batch_size=config['batch_size'], balance_threshold=0.6)
         train_loader = DataLoader(
             train_dataset,
-            batch_size=config['batch_size'],
-            shuffle=True,
+            batch_sampler=cust_sampler,
             num_workers=config['num_workers'],
             pin_memory=True if torch.cuda.is_available() else False
         )
@@ -291,10 +340,11 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         print(f"CUDA version: {torch.version.cuda}")
     
     # Create data loaders
-    if (not cifar) or (not args.classifier):
+    if (not args.cifar) or (not args.classifier):
         train_loader, val_loader = create_contrastive_data_loaders(config)
+        test_loader = None
     else:
-        train_loader, val_loader = set_loader(config)
+        train_loader, val_loader, test_loader = set_loader(config)
     # Get input channels from a sample
     # sample_batch = next(iter(train_loader))
 
@@ -302,37 +352,36 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         input_channels = 5
     else:
         input_channels = 3 # sample_batch['image'][0].shape[1] #  5 #
+
+    if args.cifar:
+        input_channels = 3
     print(f"Input channels: {input_channels}")
     
     # Create model
     # create_contrastive_model
-    # encoder_kwargs = {
-    #     'model_type': model_type,
-    #     'input_channels': input_channels, # 2*
-    #     'num_classes': config['num_classes'],
-    #     'dropout_rate': config.get('dropout_rate', 0.3) # was 0.3
-    # }
+    chosen_model = 'resnet34' # 'convnextv2_tiny' resnet18
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
     projection_head_kwargs = {
-        'feature_dims': (2048, 128), # resnet18 if resnet34   2048 512
+        'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
-        'use_batch_norm': False,
+        'use_batch_norm': True, # True False
         'normalize_output': True
     }
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
         'dropout_rate': 0.7,
-        'name': 'resnet50',
+        'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type=model_type
+        model_type='resnet',
+        model_name=chosen_model
     )
 
     if args.classifier:
@@ -353,13 +402,17 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
     # Calculate class weights for balanced training
-    class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
+    if args.cifar == False:
+        class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
     if not args.classifier:
-        criterion = SupConLoss(temperature=0.1) # try default 0.07 #  temperature=0.07 25
+        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
     else:
-        criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+        if args.cifar == False:
+            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+        else:
+            criterion = nn.CrossEntropyLoss()
     
     # Create optimizer and scheduler
     if not args.classifier:
@@ -456,7 +509,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     eval_results = {}
     # Detailed evaluation
     print("\nPerforming detailed evaluation...")
-    eval_results = trainer.evaluate_detailed()
+    eval_results = trainer.evaluate_detailed(test_loader=test_loader)
     
     # Save evaluation results
     eval_save_path = os.path.join(save_dir, 'evaluation_results.json')

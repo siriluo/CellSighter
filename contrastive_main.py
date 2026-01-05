@@ -105,8 +105,12 @@ Examples:
         args.warmup_from = 0.01
         args.warm_epochs = 10
         if args.cosine:
-            eta_min = config['lr'] * (args.lr_decay_rate ** 3)
-            args.warmup_to = eta_min + (config['lr'] - eta_min) * (
+            eta_min_en = config['lr'] * (args.lr_decay_rate ** 3)
+            args.warmup_to = eta_min_en + (config['lr'] - eta_min_en) * (
+                    1 + math.cos(math.pi * args.warm_epochs / config["epoch_max"])) / 2
+
+            eta_min_proj = config['proj_lr'] * (args.lr_decay_rate ** 3)
+            args.warmup_to_p = eta_min_proj + (config['proj_lr'] - eta_min_proj) * (
                     1 + math.cos(math.pi * args.warm_epochs / config["epoch_max"])) / 2
         else:
             args.warmup_to = config['lr']
@@ -249,6 +253,8 @@ def main():
         # Run training
         print("Starting training...")
         args.learning_rate = config["lr"]
+        args.learning_rate_p = config.get("proj_lr", config["lr"])
+        args.cifar = config.get("cifar", False)
         trainer, history, eval_results = train_main(
             config_path=temp_config_path,
             model_type=args.model,
