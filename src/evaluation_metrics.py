@@ -20,6 +20,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix, roc_auc_score
 from matplotlib import pyplot as plt
 from PIL import Image
+from torch_geometric.loader import HGTLoader, NeighborLoader
 
 
 # Local imports
@@ -27,6 +28,7 @@ from models import create_model, get_model_info
 from trainer import Trainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
 from data.data import CellCropsDataset
+from data.graph_data import *
 from train import create_data_loaders, load_config, calculate_class_weights, create_optimizer_and_scheduler
 from contrastive_learn_add import ContrastiveModel
 import json
@@ -42,8 +44,7 @@ class ConClassEvaluator:
                  model: nn.Module,
                  encoder_ckpt_path: str,
                  classifier: nn.Module,
-                 train_loader: DataLoader,
-                 val_loader: DataLoader,
+                 test_loader: DataLoader,
                  criterion: nn.Module,
                  optimizer: optim.Optimizer,
                  num_classes: int,
@@ -68,8 +69,7 @@ class ConClassEvaluator:
             log_interval: Frequency of logging (in batches)
         """
         self.model = model.to(device)
-        self.train_loader = train_loader
-        self.val_loader = val_loader
+        self.test_loader = test_loader
         self.criterion = criterion
         self.optimizer = optimizer
         self.num_classes = num_classes
@@ -80,6 +80,7 @@ class ConClassEvaluator:
         self.args = args
         self.encoder_ckpt = encoder_ckpt_path
         self.classifier = classifier
+        self.config = config
 
         self.encoder_model, self.classifier, self.criterion = self.set_model(self.model, self.encoder_ckpt, classifier=self.classifier, criterion=self.criterion)
         
@@ -109,6 +110,19 @@ class ConClassEvaluator:
         self.best_val_loss = 110.0
 
         self.pos_bin_label = 7
+
+        # construct graph data
+        # Switch to non-graph classifier for now
+        self.use_graph = self.config.get('graph', False)
+        if self.use_graph:
+            distance_threshold = 80  # Example threshold value
+            graph_data = GraphDataConstructor(self.encoder_model, self.device)
+
+            embeddings_te, labels_te, metadata_te, node_indices_te = graph_data.extract_embeddings(self.test_loader)
+            graph_data_te = graph_data.construct_graph(embeddings_te, metadata_te, labels_te, node_indices_te, dist=distance_threshold)
+
+            kwargs = {'batch_size': 512, 'num_workers': 4} # , 'persistent_workers': True
+            self.graph_test_loader = NeighborLoader(graph_data_te, num_neighbors=[5], shuffle=True, **kwargs)
 
 
     def get_multiclass_ct_name(self, label):
@@ -239,7 +253,7 @@ class ConClassEvaluator:
             raise NotImplementedError('This code requires GPU')
 
         return model_to_load, classifier, criterion #
-    
+
 
     def evaluate_detailed(self, test_loader: Optional[DataLoader] = None) -> Dict[str, Any]:
         """
@@ -252,7 +266,10 @@ class ConClassEvaluator:
             Dictionary with detailed evaluation results
         """
         if test_loader is None:
-            test_loader = self.val_loader
+            if self.use_graph:
+                test_loader = self.graph_val_loader
+            else:
+                test_loader = self.test_loader
 
         self.encoder_model.eval()
         self.classifier.eval()
@@ -269,15 +286,28 @@ class ConClassEvaluator:
         bin_pos_label = self.pos_bin_label
         bin_ct_name = self.get_multiclass_ct_name(bin_pos_label)
 
+        losses = AverageMeter()
+
         with torch.no_grad():
-            for idx, batch in enumerate(self.val_loader):
-                images = batch['image'] #.to(self.device) [0] #
-                labels = batch['label'] #.to(self.device) [1] #
-                if idx < 10:
-                    print(images.squeeze().numpy().shape)
-                    pil_image = Image.fromarray(images.squeeze().permute(1, 2, 0).numpy().astype(np.uint8))
-                    pil_image.save(f'{self.save_dir}/output_image_{idx}_{labels.item()}.png')
+            for idx, batch in enumerate(test_loader):
+                # batch = batch.to(self.device)
+
+                # batch_size = batch.batch_size
+
+                # labels = batch.y[:batch_size].type(torch.LongTensor).to(device=self.device)
+
+                # # compute loss
+                # output = self.classifier(batch.x, batch.edge_index)[:batch_size].to(device=self.device)
+                # loss = self.criterion(output, labels)
                 
+                # if self.args.cifar == False:
+                images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                labels = batch['label'] #.to(self.device) [1]
+                # else:
+                #     images = batch[0]
+                #     labels = batch[1]
+                
+                # if self.args.cifar == False:
                 m = batch.get('mask', None)
                 if m is not None:
                     images = torch.cat([images, m], dim=1)
@@ -291,6 +321,8 @@ class ConClassEvaluator:
                     features = self.encoder_model.encoder(images)
                 output = self.classifier(features.detach())
                 loss = self.criterion(output, labels)
+
+                losses.update(loss.item(), bsz)
                 
                 # Get predictions and probabilities
                 probs = torch.softmax(output, dim=1)
@@ -298,10 +330,14 @@ class ConClassEvaluator:
                 if self.num_classes > 2:
                     preds = probs.argmax(1)
                 else:
-                    _, preds = torch.max(output, 1)
+                    _, preds = torch.max(output, 1) # Need to convert to binary class labels?
+                    preds_temp = preds.clone()
+                    preds[preds_temp == bin_pos_label] = 0
+                    preds[preds_temp != bin_pos_label] = 1
+                    
                 
                 # Collect results
-                running_loss += loss.item() * images.size(0)
+                # running_loss += loss.item() * batch_size
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
                 if self.num_classes <= 2:
@@ -309,13 +345,16 @@ class ConClassEvaluator:
                 else:
                     all_probs.append(probs.cpu().numpy())
                 
-                list_of_probs.append(probs.cpu().numpy().tolist())
-                list_of_logits.append(output.cpu().numpy().tolist())
-                list_of_labels.append(labels.cpu().numpy().tolist())
+                # list_of_probs.append(probs.cpu().numpy().tolist())
+                # list_of_logits.append(output.cpu().numpy().tolist())
+                # list_of_labels.append(labels.cpu().numpy().tolist())
+        
+        # For the mapping, tumor cells are class 7 (index 7).
+        
 
-        # Calculate metrics 
+        # Calculate metrics
+        avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
         accuracy = accuracy_score(all_labels, all_preds)
-        avg_loss = running_loss / len(self.val_loader.dataset)
 
         if self.num_classes <= 2:
             average_method = 'binary'
@@ -323,7 +362,7 @@ class ConClassEvaluator:
             average_method = 'weighted'
 
         precision, recall, f1, support = precision_recall_fscore_support(
-            all_labels, all_preds, labels=np.arange(self.num_classes), average=None, zero_division=0
+            all_labels, all_preds, average=None, zero_division=0
         )
 
         # one by one binary
@@ -335,8 +374,11 @@ class ConClassEvaluator:
         
         # Overall metrics
         precision_avg, recall_avg, f1_avg, _ = precision_recall_fscore_support(
-            all_labels, all_preds, labels=np.arange(self.num_classes), average=average_method, zero_division=0
+            all_labels, all_preds, average=average_method, zero_division=0
         )
+        # precision_avg, recall_avg, f1_avg, _ = precision_recall_fscore_support(
+        #     all_labels, all_preds, average=average_method, zero_division=0, pos_label=0
+        # )
         
         # Confusion matrix
         cm = confusion_matrix(all_labels, all_preds)
@@ -348,25 +390,25 @@ class ConClassEvaluator:
             else:
                 all_probs = np.vstack(all_probs)
                 
-                auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted', labels=np.arange(self.num_classes))
-                multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None, labels=np.arange(self.num_classes))
+                auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
+                multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
         except ValueError:
             auc = 0.0  # Handle case where only one class is present
             if self.num_classes > 2:
                 multi_aucs = []
 
 
-        with open(f'{self.save_dir}/output_logits.csv', 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerows(list_of_logits)
+        # with open('output_logits.csv', 'w', newline='') as csvfile:
+        #     writer = csv.writer(csvfile)
+        #     writer.writerows(list_of_logits)
 
-        with open(f'{self.save_dir}/output_probs.csv', 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerows(list_of_probs)
+        # with open('output_probs.csv', 'w', newline='') as csvfile:
+        #     writer = csv.writer(csvfile)
+        #     writer.writerows(list_of_probs)
 
-        with open(f'{self.save_dir}/output_labels.csv', 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerows(list_of_labels)
+        # with open('output_labels.csv', 'w', newline='') as csvfile:
+        #     writer = csv.writer(csvfile)
+        #     writer.writerows(list_of_labels)
 
         results = {
             'accuracy': accuracy,

@@ -276,6 +276,83 @@ class CellClassifierResNet(nn.Module):
         return x
 
 
+class CellEncoderResNet(nn.Module):
+    """
+    ResNet-based architecture for cell classification.
+    More robust for deeper networks and better gradient flow.
+    """
+    
+    def __init__(self, 
+                 full_model):
+        super(CellEncoderResNet, self).__init__()
+        
+        self.input_channels = full_model.input_channels
+        self.num_classes = full_model.num_classes
+        
+        # Initial convolution
+        self.conv1 = full_model.conv1
+        self.bn1 = full_model.bn1
+        self.maxpool = full_model.maxpool
+        
+        # Residual layers
+        self.layer1 = full_model.layer1
+        self.layer2 = full_model.layer2
+        self.layer3 = full_model.layer3
+        self.layer4 = full_model.layer4
+
+        # Classification head
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # self.classifier = nn.Sequential(
+        #     nn.Dropout(dropout_rate),
+        #     nn.Linear(512, 256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Dropout(dropout_rate),
+        #     nn.Linear(256, num_classes)
+        # )
+        
+        # self._initialize_weights()
+    
+    def _make_layer(self, in_channels: int, out_channels: int, 
+                   num_blocks: int, stride: int) -> nn.Sequential:
+        """Create a layer with multiple residual blocks."""
+        layers = []
+        layers.append(ResidualBlock(in_channels, out_channels, stride))
+        
+        for _ in range(1, num_blocks):
+            layers.append(ResidualBlock(out_channels, out_channels))
+        
+        return nn.Sequential(*layers)
+    
+    def _initialize_weights(self):
+        """Initialize model weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through ResNet."""
+        # print(x.shape)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.maxpool(x)
+        
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        # x = self.classifier(x)
+        
+        return x
+
+
 class CellClassifierResNetFeatureExtractor(nn.Module):
     """
     Feature extractor version of CellClassifierResNet.
@@ -481,7 +558,7 @@ def convert_to_feature_extractor(model: nn.Module,
     return feature_extractor
 
 
-def create_model(model_type: str = 'cnn', **kwargs) -> nn.Module:
+def create_model(model_type: str = 'cnn', contrastive: bool = False, **kwargs) -> nn.Module:
     """
     Factory function to create models.
     
@@ -492,7 +569,7 @@ def create_model(model_type: str = 'cnn', **kwargs) -> nn.Module:
     Returns:
         Initialized model
     """
-    contrastive = True
+    # contrastive = True
     if model_type.lower() == 'cnn':
         return CellClassifierCNN(**kwargs)
     elif model_type.lower() == 'resnet':

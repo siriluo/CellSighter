@@ -64,6 +64,9 @@ class CellCropsDataset(Dataset):
         sample = self._crops[idx].sample(self._mask)
         # print("break?")
 
+        # for x in sample.values():
+        #     print(type(x))
+
         num_cell_samples = len(sample['image']) if isinstance(sample['image'], list) else 1
         # print(f"num_cell_samples: {num_cell_samples}")
 

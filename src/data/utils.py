@@ -50,20 +50,35 @@ class CellCrop:
 
     def sample(self, mask: bool = False) -> Dict[str, Any]:
         """Extract a sample of the cell region with optional masks."""
-        result = {
-            'cell_id': self._cell_id,
-            'image_id': self._image_id,
-            'image': self._image[self._slices].astype(np.float32),
-            'slice_x_start': self._slices[0].start,
-            'slice_y_start': self._slices[1].start,
-            'slice_x_end': self._slices[0].stop,
-            'slice_y_end': self._slices[1].stop,
-            'label': np.array(self._label, dtype=np.longlong),
-            'coordinates': self._coordinates,
-        }
+        if self._slices is not None:
+            result = {
+                'cell_id': self._cell_id,
+                'image_id': self._image_id,
+                'image': self._image[self._slices].astype(np.float32) if self._slices is not None else self._image.astype(np.float32),
+                'slice_x_start': self._slices[0].start if self._slices is not None else self._slices,
+                'slice_y_start': self._slices[1].start if self._slices is not None else self._slices,
+                'slice_x_end': self._slices[0].stop if self._slices is not None else self._slices,
+                'slice_y_end': self._slices[1].stop if self._slices is not None else self._slices,
+                'label': np.array(self._label, dtype=np.longlong),
+            }
+        else:
+            result = {
+                'cell_id': self._cell_id,
+                'image_id': self._image_id,
+                'image': self._image.astype(np.float32),
+                'label': np.array(self._label, dtype=np.longlong),
+            }
+
+        if self._coordinates is not None:
+            result.update({
+                'coordinates': self._coordinates,
+            })
         
         if mask:
-            cells_crop = self._cells[self._slices]
+            if self._slices is not None:
+                cells_crop = self._cells[self._slices]
+            else:
+                cells_crop = self._cells
             result.update({
                 'mask': (cells_crop == self._cell_id).astype(np.float32),
                 'all_cells_mask': (cells_crop > 0).astype(np.float32),
@@ -166,6 +181,8 @@ def load_data(fname: str) -> np.ndarray:
         return np.load(fname, allow_pickle=True)['data']
     elif fname.endswith((".tif", ".tiff")):
         return cv2.imread(fname, -1)
+    elif fname.endswith(".png"):
+        return cv2.imread(fname, -1)
     raise ValueError(f"Unsupported file format: {fname}")
 
 
@@ -237,7 +254,7 @@ def create_slices(slices, crop_size, bounds):
     return tuple(new_slices)
 
 
-def load_samples(config, images_names) -> Tuple[List[CellCrop], List[List[int]]]:
+def load_samples(config, images_names, already_cropped: bool = False, testing: bool = False, coords_path = None) -> Tuple[List[CellCrop], List[List[int]]]:
     """Load and process cell samples from images."""
     dataset_dir = os.path.join(config['root_dir'], "CellTypes")
     # images_names = config['train_set'] # will be val_set if for validation
@@ -245,12 +262,21 @@ def load_samples(config, images_names) -> Tuple[List[CellCrop], List[List[int]]]
     image_dir =  os.path.join(dataset_dir, "data", "images")
     cells_dir =  os.path.join(dataset_dir, "cells")
     cells2labels_dir =  os.path.join(dataset_dir, "cells2labels") 
+
+    # if xenium:
+    #     fold = config["xenium_fold"] # fold1, fold2, fold3, fold4, fold5
+    #     image_dir =  os.path.join(image_dir, fold)
+    #     cells_dir =  os.path.join(cells_dir, fold)
+    #     cells2labels_dir =  os.path.join(cells2labels_dir, fold)
     
     crops = []
     
     for image_id in images_names:
         # Find image files
-        image_path = os.path.join(image_dir, image_id+'.tif')
+        if not testing:
+            image_path = os.path.join(image_dir, image_id+'.tif')
+        else:
+            image_path = os.path.join(image_dir, image_id+'.png')
         cells_path = os.path.join(cells_dir, image_id+'.npz')
         cells2labels_path = os.path.join(cells2labels_dir, image_id+'.npz')
         
@@ -265,14 +291,30 @@ def load_samples(config, images_names) -> Tuple[List[CellCrop], List[List[int]]]
         
         # Process each cell
         # add option to use cell coordinates instead of finding objects
-        objs = ndimage.find_objects(cells)
+        # Add additional check to determine whether the data should be found using create_slices or just the folder
+        # directly.
+        # If the masks are already separated, no need to do it again:
+        if not already_cropped:
+            objs = ndimage.find_objects(cells)
+        else:
+            # for the xenium data, treat each cell image as just its own object, so only one cell per image.
+            unique = np.unique(cells)
+            num_unique_cells = len(unique)  # exclude background
+            objs = np.arange(1, num_unique_cells)  # cell ids start from 1
         
-        coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv"
+        if not testing:
+            coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
+        else:
+            coords_crc_path = None
 
         for cell_id, obj in enumerate(objs, 1):
             if obj is None: continue
-            
-            slices = create_slices(obj, (config['crop_size'], config['crop_size']), cells.shape)
+
+            if not already_cropped:
+                slices = create_slices(obj, (config['crop_size'], config['crop_size']), cells.shape)
+            else:
+                slices = None
+
             label = cl2lbl[cell_id]
 
             crops.append(

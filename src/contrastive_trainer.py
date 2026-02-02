@@ -217,10 +217,13 @@ class ContrastiveTrainer:
                 images = batch[0]
                 labels = batch[1]
 
+        
             # Code to append mask dimensions
             # for images[0] and images[1], append m[0] and m[1] respectively along channel dimension
             if self.args.cifar == False:
                 m = batch.get('mask', None)
+                # print(images[0].shape, images[1].shape)
+                # print(m[0].shape, m[1].shape)
                 if m is not None:
                     images[0] = torch.cat([images[0], m[0]], dim=1)
                     images[1] = torch.cat([images[1], m[1]], dim=1)

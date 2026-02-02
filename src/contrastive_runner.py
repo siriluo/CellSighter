@@ -189,12 +189,50 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     Returns:
         Tuple of (train_loader, val_loader)
     """
+    # In this case, we can get the image names by looping through the files instead for our situation: 
+    # folds = ["fold1"]
+    # for fold in folds:
+    #     fold_path = f"{patches_path}/{fold}"
+
+    #     os.makedirs(f"{save_cs_path}/cells2labels/{fold}", exist_ok=True)
+
+    #     fold_file_names = os.listdir(fold_path)
+    #     fold_file_names = [f for f in fold_file_names if os.path.isfile(fold_path + "/" + f)]
+    # image_names = fold_file_names
+    use_xenium = config.get("xenium", False)
+
+    if use_xenium:
+        root_dir = config["root_dir"]
+
+        folds = config.get("xenium_fold", [])
+        val_folds = ["fold4"]
+        
+        train_image_names = []
+        for fold in folds:
+            fold_path = f"{root_dir}/CellTypes/cells2labels/{fold}"
+
+            tr_fold_file_names = os.listdir(fold_path)
+            tr_fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in tr_fold_file_names if os.path.isfile(fold_path + "/" + f)]
+            train_image_names.extend(tr_fold_file_names)
+
+
+        val_image_names = []
+        for fold in val_folds:
+            fold_path = f"{root_dir}/CellTypes/cells2labels/{fold}"
+
+            val_fold_file_names = os.listdir(fold_path)
+            val_fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in val_fold_file_names if os.path.isfile(fold_path + "/" + f)]
+            val_image_names.extend(val_fold_file_names)
+    else:
+        train_image_names = config['train_set']
+        val_image_names = config['val_set'] 
+
     print("Loading training data...")
-    train_crops = load_samples(config, config['train_set'])
+    train_crops = load_samples(config, train_image_names, already_cropped=use_xenium, testing=use_xenium)
     print(f"Loaded {len(train_crops)} training samples")
     
     print("Loading validation data...")
-    val_crops = load_samples(config, config['val_set'])
+    val_crops = load_samples(config, val_image_names, already_cropped=use_xenium, testing=use_xenium)
     print(f"Loaded {len(val_crops)} validation samples")
     
     # Create transforms
@@ -280,22 +318,22 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     
     use_graph = config.get('graph', False)
     if not use_graph:
-        # train_loader = DataLoader(
-        #     train_dataset,
-        #     batch_size=config['batch_size'],
-        #     # sampler=torch.utils.data.RandomSampler(train_dataset, num_samples=len(train_dataset), replacement=True),
-        #     shuffle=True,
-        #     num_workers=config['num_workers'],
-        #     pin_memory=True if torch.cuda.is_available() else False
-        # )
-
-        cust_sampler = TwoStageBalancedSampler(train_dataset_labels, batch_size=config['batch_size'], balance_threshold=0.6)
         train_loader = DataLoader(
             train_dataset,
-            batch_sampler=cust_sampler,
+            batch_size=config['batch_size'],
+            # sampler=torch.utils.data.RandomSampler(train_dataset, num_samples=len(train_dataset), replacement=True),
+            shuffle=True,
             num_workers=config['num_workers'],
             pin_memory=True if torch.cuda.is_available() else False
         )
+
+        # cust_sampler = TwoStageBalancedSampler(train_dataset_labels, batch_size=config['batch_size'], balance_threshold=0.6)
+        # train_loader = DataLoader(
+        #     train_dataset,
+        #     batch_sampler=cust_sampler,
+        #     num_workers=config['num_workers'],
+        #     pin_memory=True if torch.cuda.is_available() else False
+        # )
     else:
         train_loader = DataLoader(
             train_dataset,
@@ -407,7 +445,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create loss function with class weights
     if not args.classifier:
-        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
+        criterion = SupConLoss(temperature=0.13) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
             criterion = nn.CrossEntropyLoss(weight=class_weights) # 

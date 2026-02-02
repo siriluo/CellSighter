@@ -97,6 +97,7 @@ Examples:
         else:
             args.warmup_to = config['lr']
 
+    args.cifar = True
 
     return args
 

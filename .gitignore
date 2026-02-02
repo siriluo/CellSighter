@@ -60,6 +60,8 @@ experiment_results/
 # Logs
 logs/
 *.log
+*.o*
+*.e*
 src/data/cifar_10/cifar-10-python.tar.gz
 src/data/cifar_10/cifar-10-batches-py/batches.meta
 src/data/cifar_10/cifar-10-batches-py/data_batch_1

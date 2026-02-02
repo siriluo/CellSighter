@@ -1,0 +1,27 @@
+{
+  "crop_input_size": 64,
+  "crop_size": 64,
+  "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/xenium/input/cellsighter_version",
+  "train_set": [],
+  "val_set": [],
+  "test_set": [],
+  "num_classes": 10,
+  "epoch_max": 100,
+  "lr": 0.01,
+  "proj_lr": 0.01,
+  "batch_size": 1,
+  "num_workers": 8,
+  "weight_to_eval": "",
+  "sample_batch": false,
+  "to_pad": false,
+  "hierarchy_match": {
+    "0": "other cells",
+    "1": "tumor cells"
+  },
+  "aug": false,
+  "save_dir": "./con_classifier_testing_checkpoints",
+  "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/new_full_class_testing_results/second_testing_set/results_supcon_mask_aug_resnet50_1/best_model.pth",
+  "class_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/new_full_class_testing_results/second_testing_set/results_conclass_aug_mask_test1_resnet/best_model.pth",
+  "classifier": true,
+  "graph": false
+}

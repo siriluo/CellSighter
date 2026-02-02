@@ -161,107 +161,100 @@ class HybridBatchSampler(Sampler):
 
 
 class TwoStageBalancedSampler(Sampler):
-    """
-    Stage 1: Sample without replacement as much as possible
-    Stage 2: When minority classes run out, continue with majority classes only
-    
-    This maximizes data usage while avoiding harmful repetition.
-    """
+    """Fixed version with proper dtype handling."""
     
     def __init__(self, labels, batch_size=2048, balance_threshold=0.5):
-        """
-        Args:
-            balance_threshold: Fraction of epoch to maintain balance
-                              0.5 = first 50% balanced, then majority classes only
-        """
-        self.labels = np.array(labels)
-        self.batch_size = batch_size
-        self.n_classes = len(np.unique(labels))
-        self.balance_threshold = balance_threshold
+        # Convert labels to numpy array with int64
+        self.labels = np.array(labels, dtype=np.int64)
+        self.batch_size = int(batch_size)  # Ensure int
+        self.n_classes = len(np.unique(self.labels))
+        self.balance_threshold = float(balance_threshold)
         
-        # Group indices
+        # Group indices by class
         self.class_indices = {}
         self.class_sizes = {}
+        
         for class_id in range(self.n_classes):
-            indices = np.where(labels == class_id)[0]
-            self.class_indices[class_id] = indices
+            # Get indices for this class
+            indices = np.where(self.labels == class_id)[0]
+            
+            # Store as int64
+            self.class_indices[class_id] = indices.astype(np.int64)
             self.class_sizes[class_id] = len(indices)
         
         min_class_size = min(self.class_sizes.values())
         max_class_size = max(self.class_sizes.values())
         
-        # Stage 1: Balanced batches (limited by minority classes)
-        self.samples_per_class_balanced = batch_size // self.n_classes
+        # Calculate batch composition
+        self.samples_per_class_balanced = self.batch_size // self.n_classes
         self.n_balanced_batches = int(
-            (min_class_size / self.samples_per_class_balanced) * balance_threshold
+            (min_class_size / self.samples_per_class_balanced) * self.balance_threshold
         )
         
-        # Stage 2: Continue with remaining majority class samples
         remaining_samples = sum(
             max(0, size - self.samples_per_class_balanced * self.n_balanced_batches)
             for size in self.class_sizes.values()
         )
-        self.n_unbalanced_batches = remaining_samples // batch_size
+        self.n_unbalanced_batches = int(remaining_samples // self.batch_size)
         
         self.total_batches = self.n_balanced_batches + self.n_unbalanced_batches
         
-        print("="*60)
-        print("TWO-STAGE BALANCED SAMPLER")
-        print("="*60)
-        print(f"Stage 1 (Balanced):")
-        print(f"  Batches: {self.n_balanced_batches}")
-        print(f"  Batch size: {self.samples_per_class_balanced * self.n_classes}")
-        print(f"  Samples: {self.n_balanced_batches * self.samples_per_class_balanced * self.n_classes}")
-        
-        print(f"\nStage 2 (Natural distribution):")
-        print(f"  Batches: {self.n_unbalanced_batches}")
-        print(f"  Batch size: {batch_size}")
-        print(f"  Samples: {self.n_unbalanced_batches * batch_size}")
-        
-        print(f"\nTotal batches: {self.total_batches}")
-        print(f"Total samples: {self.n_balanced_batches * self.samples_per_class_balanced * self.n_classes + self.n_unbalanced_batches * batch_size}")
-        print("="*60)
+        print(f"TwoStageBalancedSampler initialized:")
+        print(f"  Balanced batches: {self.n_balanced_batches}")
+        print(f"  Unbalanced batches: {self.n_unbalanced_batches}")
+        print(f"  Total batches: {self.total_batches}")
     
     def __iter__(self):
-        # Shuffle all indices
+        # Shuffle indices for each class
         shuffled_indices = {}
         for class_id in range(self.n_classes):
             indices = self.class_indices[class_id].copy()
             np.random.shuffle(indices)
             shuffled_indices[class_id] = indices
         
-        batch_idx = 0
-        
         # Stage 1: Balanced batches
-        for i in range(self.n_balanced_batches):
-            batch = []
+        for batch_idx in range(self.n_balanced_batches):
+            batch_indices = []
             
             for class_id in range(self.n_classes):
-                start = i * self.samples_per_class_balanced
+                start = batch_idx * self.samples_per_class_balanced
                 end = start + self.samples_per_class_balanced
-                batch.extend(shuffled_indices[class_id][start:end])
+                
+                # Get indices for this class
+                class_batch = shuffled_indices[class_id][start:end]
+                batch_indices.extend(class_batch)
             
-            np.random.shuffle(batch)
-            yield batch
-            batch_idx += 1
+            # Convert to int64 array
+            batch_indices = np.array(batch_indices, dtype=np.int64)
+            np.random.shuffle(batch_indices)
+            
+            # CRITICAL: Yield as list of native Python ints
+            yield [int(idx) for idx in batch_indices]
         
-        # Stage 2: Use remaining samples from majority classes
-        remaining_indices = []
+        # Stage 2: Unbalanced batches
+        remaining = []
         for class_id in range(self.n_classes):
             start = self.n_balanced_batches * self.samples_per_class_balanced
-            remaining_indices.extend(shuffled_indices[class_id][start:])
+            remaining.extend(shuffled_indices[class_id][start:])
         
-        np.random.shuffle(remaining_indices)
+        # Shuffle remaining
+        remaining = np.array(remaining, dtype=np.int64)
+        np.random.shuffle(remaining)
         
-        # Create batches from remaining
-        for i in range(self.n_unbalanced_batches):
-            start = i * self.batch_size
+        # Create unbalanced batches
+        for batch_idx in range(self.n_unbalanced_batches):
+            start = batch_idx * self.batch_size
             end = start + self.batch_size
-            batch = remaining_indices[start:end]
-            yield batch
+            
+            batch_indices = remaining[start:end]
+            
+            # CRITICAL: Yield as list of native Python ints
+            yield [int(idx) for idx in batch_indices]
     
     def __len__(self):
         return self.total_batches
     
 
 # Try and focus on cells from different slides when balancing the samples.
+
+

@@ -1,0 +1,31 @@
+{
+  "crop_input_size": 64,
+  "crop_size": 128,
+  "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/xenium/input/cellsighter_version",
+  "train_set": [],
+  "val_set": [],
+  "xenium_fold": [
+    "fold1",
+    "fold2",
+    "fold3"
+  ],
+  "num_classes": 10,
+  "epoch_max": 125,
+  "lr": 0.01,
+  "proj_lr": 0.01,
+  "batch_size": 2048,
+  "num_workers": 4,
+  "weight_to_eval": "",
+  "sample_batch": false,
+  "to_pad": false,
+  "hierarchy_match": {
+    "0": "other cells",
+    "1": "tumor cells"
+  },
+  "aug": true,
+  "save_dir": "./contrastive_checkpoints",
+  "ckpt_path": "",
+  "xenium": true,
+  "classifier": false,
+  "graph": false
+}

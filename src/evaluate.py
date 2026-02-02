@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from typing import Dict, Tuple, Any
 import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
@@ -19,65 +19,40 @@ src_dir = Path(__file__).parent / 'src'
 sys.path.insert(0, str(src_dir))
 
 # Local imports
+from evaluation_metrics import ConClassEvaluator
 from models import create_model, get_model_info
 from contrastive_learn_add import ContrastiveModel, ProjectionHead, ClassificationHead
+from gat_model import GATv2ClassificationHead
 from contrastive_trainer import ContrastiveTrainer
-from evaluation_metrics import ConClassEvaluator
+from contrastive_classifier_trainer import ConClassTrainer
+from contrastive_gat_classifier_trainer import ConClassGraphTrainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
 from data.data import CellCropsDataset
-from train import load_config, create_data_loaders, calculate_class_weights
+from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
+from data.custom_samplers import TwoStageBalancedSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from util.utils import TwoCropTransform
 
 
-use_mask = False # False set to true if you want to include the mask info
+use_mask = True # False set to true if you want to include the mask info
 cifar = False
 
+model_dict = {
+    'resnet18': 512,
+    'resnet34': 512,
+    'resnet50': 2048,
+    'resnet101': 2048,
+    'convnextv2_tiny': 768,
+}
 
-def get_multiclass_ct_name(label, num_classes: int) -> str:
-
-    if num_classes == 10:
-        new_mapping = {
-            0: "CD4+ T",
-            1: "CD8+ T",
-            2: "Treg",
-            3: "B cells",
-            4: "Monocytes / Macrophages",
-            5: "Stromal Cells",
-            6: "Smooth Muscle",
-            7: "Tumor Cells",
-            8: "Vasculature",
-            9: "Granulocytes",
-        }
-    else:
-        new_mapping = {
-            0: "CD4+ T",
-            1: "CD8+ T",
-            2: "Treg",
-            3: "B cells",
-            4: "NK Cells",
-            5: "Dendritic Cells",
-            6: "Monocytes / Macrophages",
-            7: "Stromal Cells",
-            8: "Smooth Muscle",
-            9: "Tumor Cells",
-            10: "Vasculature",
-            11: "Granulocytes",
-        }
-
-
-    class_name = new_mapping[label]
-
-    return class_name
-
-
-def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet') -> nn.Module:
+def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
     model = ContrastiveModel(
         base_model=model_type,
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
         norm_proj_head_input=False,
+        model_name=model_name
     )
 
     return model
@@ -94,23 +69,41 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     #     )
     #     print("Adam")
     # else:
-    optimizer = optim.SGD(model.parameters(),
-                    lr=config['lr'],
-                    momentum=0.9,
-                    weight_decay=1e-4)
-    print("SGD")
-    
-    # Learning rate scheduler
-    scheduler = optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=config.get('lr_step_size', 30), # 10 20
-        gamma=config.get('lr_gamma', 0.1)  #  0.5
+
+    if config['classifier']:
+        optimizer = optim.SGD(model.parameters(),
+                        lr=config['lr'],
+                        momentum=0.9,
+                        weight_decay=1e-4)
+        print("SGD")
+    else:
+        ## Test optimizer with multiple LRs
+        # optimizer = optim.SGD([
+        #         {'params': model.encoder.parameters(), 'lr': config['lr'], 'name': 'encoder'},
+        #         {'params': model.projection_head.parameters(), 'lr': config['proj_lr'], "weight_decay": 0.0, 'name': 'projection_head'},],
+        #         momentum=0.9,
+        #         weight_decay=1e-4)
+        optimizer = optim.SGD(model.parameters(),
+                lr=config['lr'],
+                momentum=0.9,
+                weight_decay=1e-4)
+        print("SGD with different LRs")
+
+    # # Learning rate scheduler
+    # scheduler = optim.lr_scheduler.StepLR(
+    #     optimizer,
+    #     step_size=config.get('lr_step_size', 40), # 10 20
+    #     gamma=config.get('lr_gamma', 0.2)  #  0.5
+    # )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=config.get('epoch_max', 100), eta_min=1e-6
     )
     
     return optimizer, scheduler
 
 
-def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str, num_classes: int):
+def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str):
     """Print statistics about the dataset."""
     print(f"\n{dataset_name} Dataset Statistics:")
     print(f"Total samples: {len(dataset)}")
@@ -128,7 +121,7 @@ def print_dataset_stats(dataset: CellCropsDataset, dataset_name: str, num_classe
     
     print(f"Class distribution:")
     for label, count in zip(unique, counts):
-        class_name = get_multiclass_ct_name(label, num_classes) # "Tumor" if label == 1 else "Non-tumor"
+        class_name = get_multiclass_ct_name(label) # "Tumor" if label == 1 else "Non-tumor"
         percentage = (count / len(labels)) * 100
         print(f"  {class_name} (label {label}): {count} samples ({percentage:.1f}%)")
     
@@ -160,12 +153,18 @@ def set_loader(config: Dict[str, Any]):
     ])
 
 
-    train_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
+    cifar_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
                                         transform=train_transform,
                                         download=True)
-    val_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
+    test_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
                                     train=False,
                                     transform=val_transform)
+        
+    train_size = int(0.8 * len(cifar_dataset))
+    val_size = len(cifar_dataset) - train_size
+
+    RANDOM_SEED = 42 
+    train_dataset, val_dataset = random_split(cifar_dataset, [train_size, val_size], generator=torch.Generator().manual_seed(RANDOM_SEED))
 
     train_sampler = None
     train_loader = torch.utils.data.DataLoader(
@@ -173,9 +172,12 @@ def set_loader(config: Dict[str, Any]):
         num_workers=config['num_workers'], pin_memory=True, sampler=train_sampler)
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=256, shuffle=False,
-        num_workers=8, pin_memory=True)
+        num_workers=config['num_workers'], pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=256, shuffle=False,
+        num_workers=config['num_workers'], pin_memory=True)
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
@@ -188,27 +190,32 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     Returns:
         Tuple of (train_loader, val_loader)
     """
-    print("Loading training data...")
-    train_crops = load_samples(config, config['train_set'])
-    print(f"Loaded {len(train_crops)} training samples")
+    # In this case, we can get the image names by looping through the files instead for our situation: 
+    folds = [config.get("xenium_fold", None)]
     
-    print("Loading test data...")
-    val_crops = load_samples(config, config['test_set'])
-    print(f"Loaded {len(val_crops)} test samples")
-    
-    # Create transforms
-    if config.get('aug', False):
-        train_transform = create_training_transform(
-            crop_size=config['crop_size'], # potentially replace with config['crop_input_size']
-            shift=config.get('shift', 5),
-            mask=use_mask,
-        )
-        print("Using data augmentation for training")
+    if folds[0] is not None:
+        root_dir = config["root_dir"]
+        for fold in folds:
+            fold_path = f"{root_dir}/CellTypes/cells2labels/{fold}"
+
+            fold_file_names = os.listdir(fold_path)
+            fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in fold_file_names if os.path.isfile(fold_path + "/" + f)]
+        image_names = fold_file_names
     else:
-        train_transform = create_validation_transform(crop_size=config['crop_size'])
-        print("No data augmentation applied")
-    
-    val_transform = create_validation_transform(crop_size=config['crop_size'])
+        root_dir = config["root_dir"]
+        file_name_path = f"{root_dir}/CellTypes/cells2labels"
+
+        file_names = os.listdir(file_name_path)
+        file_names = [f"{f.split('.')[0]}" for f in file_names if os.path.isfile(file_name_path + "/" + f)]
+        image_names = file_names
+
+    print("Loading testing data...")
+    # test_crops = load_samples(config, image_names, already_cropped=True, xenium=True)
+    test_crops = load_samples(config, image_names, testing=True)
+    print(f"Loaded {len(test_crops)} testing samples")
+
+    # Create transforms
+    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
 
     # no_op_transform = torchvision.transforms.Compose([
     #     torchvision.transforms.ToTensor(),
@@ -216,77 +223,24 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     # ])
     
     # Create datasets
-    if config['classifier']:
-        train_dataset = CellCropsDataset(
-            crops=train_crops,
-            transform=train_transform,
-            mask=use_mask  # Set to True if you want to include mask information
-        )
-        
-        val_dataset = CellCropsDataset(
-            crops=val_crops,
-            transform=val_transform,
-            mask=use_mask
-        )
-    else:
-        train_dataset = CellCropsDataset(
-            crops=train_crops,
-            transform=TwoCropTransform(train_transform),
-            mask=use_mask  # Set to True if you want to include mask information
-        )
-        
-        val_dataset = CellCropsDataset(
-            crops=val_crops,
-            transform=TwoCropTransform(val_transform),
-            mask=use_mask
-        )
-    
-    # Print dataset statistics
-    # print_dataset_stats(train_dataset, "Training")
-    print_dataset_stats(val_dataset, "Validation", config['num_classes'])
+    test_dataset = CellCropsDataset(
+        crops=test_crops,
+        transform=test_transform,
+        mask=use_mask
+    )
     
     # Create data loaders
+    use_graph = config.get('graph', False)
 
-    if cifar:
-        mean = (0.4914, 0.4822, 0.4465)
-        std = (0.2023, 0.1994, 0.2010)
-
-        normalize = torchvision.transforms.Normalize(mean=mean, std=std)
-
-        train_transform = torchvision.transforms.Compose([
-            torchvision.transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomApply([
-                torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
-            ], p=0.8),
-            torchvision.transforms.RandomGrayscale(p=0.2),
-            torchvision.transforms.ToTensor(),
-            normalize,
-        ])
-
-        train_dataset = torchvision.datasets.CIFAR10(root='/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/cifar_10',
-                                    transform=TwoCropTransform(train_transform),
-                                    download=True)
-    
-
-    train_loader = None 
-    # DataLoader(
-    #     train_dataset,
-    #     batch_size=config['batch_size'],
-    #     shuffle=True,
-    #     num_workers=config['num_workers'],
-    #     pin_memory=True if torch.cuda.is_available() else False
-    # )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=1, #   config['batch_size']
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config['batch_size'], #  1
         shuffle=False,
         num_workers=config['num_workers'],
         pin_memory=True if torch.cuda.is_available() else False
     )
     
-    return train_loader, val_loader
+    return test_loader
 
 
 def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = None, args=None):
@@ -313,10 +267,11 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         print(f"CUDA version: {torch.version.cuda}")
     
     # Create data loaders
-    if (not cifar) or (not args.classifier):
-        train_loader, test_loader = create_contrastive_data_loaders(config)
-    else:
-        train_loader, test_loader = set_loader(config)
+    # if (not args.cifar) or (not args.classifier):
+    #     test_loader = create_contrastive_data_loaders(config)
+    # else:
+    #     train_loader, val_loader, test_loader = set_loader(config)
+    test_loader = create_contrastive_data_loaders(config)
     # Get input channels from a sample
     # sample_batch = next(iter(train_loader))
 
@@ -324,50 +279,49 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         input_channels = 5
     else:
         input_channels = 3 # sample_batch['image'][0].shape[1] #  5 #
+
+    # if args.cifar:
+    #     input_channels = 3
     print(f"Input channels: {input_channels}")
     
     # Create model
     # create_contrastive_model
-    # encoder_kwargs = {
-    #     'model_type': model_type,
-    #     'input_channels': input_channels, # 2*
-    #     'num_classes': config['num_classes'],
-    #     'dropout_rate': config.get('dropout_rate', 0.3) # was 0.3
-    # }
+    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet18
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
     projection_head_kwargs = {
-        'feature_dims': (2048, 128), # resnet18 if resnet34   2048 512
+        'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
-        'use_batch_norm': False,
+        'use_batch_norm': False, # True False
         'normalize_output': True
     }
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.2,
-        'name': 'resnet50',
+        'dropout_rate': 0.7,
+        'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type=model_type
+        model_type='resnet',
+        model_name=chosen_model
     )
-    # model = create_model(
-    #     model_type=model_type,
-    #     input_channels=input_channels,
-    #     num_classes=config['num_classes'],
-    #     dropout_rate=config.get('dropout_rate', 0.3)
-    # )
 
     if args.classifier:
-        classifier = ClassificationHead(**classification_head_kwargs)
-        state_dict = torch.load(config['class_path'])
-        classifier.load_state_dict(state_dict['model_state_dict'])
-        print("Loaded classifier weights from checkpoint")
+        use_graph = config.get('graph', False)
+        if not use_graph:
+            classifier = ClassificationHead(**classification_head_kwargs)
+        else:
+            classifier = GATv2ClassificationHead(**classification_head_kwargs)
+
+        if config["class_path"] is not None:
+            state_dict = torch.load(config["class_path"])
+            classifier.load_state_dict(state_dict['model_state_dict'])
+            print("Loaded classifier weights from checkpoint")
 
     # Print model information
     model_info = get_model_info(model)
@@ -377,13 +331,17 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
     # Calculate class weights for balanced training
-    # class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
+    if args.cifar == False:
+        class_weights = calculate_class_weights(test_loader, config['num_classes'], device)
     
     # Create loss function with class weights
     if not args.classifier:
-        criterion = SupConLoss(temperature=0.1) # try default 0.07 #  temperature=0.07 25
+        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
     else:
-        criterion = nn.CrossEntropyLoss() # weight=class_weights
+        if args.cifar == False:
+            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+        else:
+            criterion = nn.CrossEntropyLoss()
     
     # Create optimizer and scheduler
     if not args.classifier:
@@ -392,7 +350,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
     
     # Create save directory
-    save_dir = config.get('save_dir', './checkpoints')
+    save_dir = config.get('save_dir', './test_checkpoints')
     os.makedirs(save_dir, exist_ok=True)
     
     # Save configuration
@@ -402,12 +360,45 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Configuration saved to {config_save_path}")
     
     # Create trainer
+    # use_graph = config.get('graph', False)
+    # if not use_graph:
+    #     trainer = ConClassTrainer(
+    #         model=model,
+    #         encoder_ckpt_path=config["ckpt_path"],
+    #         classifier=classifier,
+    #         train_loader=train_loader,
+    #         val_loader=val_loader,
+    #         criterion=criterion,
+    #         optimizer=optimizer,
+    #         num_classes=config['num_classes'],
+    #         scheduler=scheduler,
+    #         device=device,
+    #         save_dir=save_dir,
+    #         log_interval=config.get('log_interval', 50),
+    #         args=args
+    #     )
+    # else:
+    #     trainer = ConClassGraphTrainer(
+    #         model=model,
+    #         encoder_ckpt_path=config["ckpt_path"],
+    #         classifier=classifier,
+    #         train_loader=train_loader,
+    #         val_loader=val_loader,
+    #         criterion=criterion,
+    #         optimizer=optimizer,
+    #         num_classes=config['num_classes'],
+    #         scheduler=scheduler,
+    #         device=device,
+    #         save_dir=save_dir,
+    #         log_interval=config.get('log_interval', 50),
+    #         args=args
+    #     )
+
     evaluator = ConClassEvaluator(
         model=model,
         encoder_ckpt_path=config["ckpt_path"],
         classifier=classifier,
-        train_loader=train_loader,
-        val_loader=test_loader,
+        test_loader=test_loader,
         criterion=criterion,
         optimizer=optimizer,
         num_classes=config['num_classes'],
@@ -415,7 +406,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         device=device,
         save_dir=save_dir,
         log_interval=config.get('log_interval', 50),
-        args=args
+        args=args,
+        config=config
     )
 
     
@@ -433,17 +425,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     # Print final results
     print(f"\n{'='*60}")
     print("EVALUATION COMPLETED")
-    
-    # print(f"\nConfusion Matrix:")
 
-    # if config['num_classes'] <= 2:
-    #     cm = np.array(eval_results['confusion_matrix'])
-    #     print(f"                Predicted")
-    #     print(f"              Non-tumor  Tumor")
-    #     print(f"Actual Non-tumor    {cm[0, 0]:5d}  {cm[0, 1]:5d}")
-    #     print(f"       Tumor        {cm[1, 0]:5d}  {cm[1, 1]:5d}")
-    
-    print(f"\nModel and results saved to: {save_dir}")
-    print(f"Best model: {os.path.join(save_dir, 'best_model.pth')}")
     
     return eval_results
