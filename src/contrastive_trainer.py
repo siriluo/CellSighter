@@ -281,11 +281,11 @@ class ContrastiveTrainer:
         """
         self.model.eval()
         
-        running_loss = 0.0
-        all_preds = []
-        all_labels = []
-        all_probs = []
-        # all_probs_test = []
+        losses = AverageMeter()
+        # all_preds = []
+        # all_labels = []
+        # all_probs = []
+        # all_probs_test = [] , train_loader, model, criterion, optimizer, epoch
         
         with torch.no_grad():
             for idx, batch in enumerate(self.val_loader):
@@ -305,7 +305,6 @@ class ContrastiveTrainer:
                 images = images #.to(self.device)
 
                 images_new = torch.cat([images[0], images[1]], dim=0) #.unsqueeze(0)
-
                 if torch.cuda.is_available():
                     images_new = images_new.cuda(non_blocking=True)
                     labels = labels.cuda(non_blocking=True)
@@ -313,19 +312,18 @@ class ContrastiveTrainer:
 
                 # compute loss
                 # unnormalized_features, features, projection,
-            # logits
+                # logits
                 unnormalized_features, features, projection = self.model(images_new) # , logits
                 f1, f2 = torch.split(projection, [bsz, bsz], dim=0) # .squeeze()
+                
                 projection = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
                 loss = self.criterion(projection, labels)
                 
-                running_loss += loss.item() * images_new.size(0)
-        
-        # Calculate metrics
-        avg_loss = running_loss / len(self.val_loader.dataset)
+                # update metric
+                losses.update(loss.item(), bsz)
         
         metrics = {
-            'loss': avg_loss,
+            'loss': losses.avg,
         }
         
         return metrics
@@ -430,9 +428,9 @@ class ContrastiveTrainer:
         self.model.eval()
         
         running_loss = 0.0
-        all_preds = []
-        all_labels = []
-        all_probs = []
+        # all_preds = []
+        # all_labels = []
+        # all_probs = []
         
 
         bin_pos_label = self.pos_bin_label

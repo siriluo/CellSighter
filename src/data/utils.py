@@ -174,6 +174,25 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
         ])
 
 
+def convert_to_simpler_labels(label): 
+    
+    new_mapping = {
+        0: 0,
+        1: 0,
+        2: 0,
+        3: 0,
+        4: 0,
+        5: 1,
+        6: 1,
+        7: 2,
+        8: 1,
+        9: 0,
+    }
+    
+    simpler_label = new_mapping.get(label, label)  # Default to original label if not in mapping
+    
+    return simpler_label
+
 
 def load_data(fname: str) -> np.ndarray:
     """Load image data from file."""
@@ -263,7 +282,7 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
     cells_dir =  os.path.join(dataset_dir, "cells")
     cells2labels_dir =  os.path.join(dataset_dir, "cells2labels") 
 
-    # if xenium:
+    # if testing:
     #     fold = config["xenium_fold"] # fold1, fold2, fold3, fold4, fold5
     #     image_dir =  os.path.join(image_dir, fold)
     #     cells_dir =  os.path.join(cells_dir, fold)

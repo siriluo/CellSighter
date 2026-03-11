@@ -17,6 +17,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 from typing import Dict, Any, Optional, Union
 from models import create_model
 from gat_model import GraphAttentionLayer
@@ -196,6 +197,30 @@ class SupConResNet(nn.Module):
         feat = self.encoder(x)
         # feat = F.normalize(self.head(feat), dim=1)
         return feat
+    
+
+class PretrainedSupConResNet(nn.Module):
+    """backbone + projection head"""
+    def __init__(self, name='resnet50', head='mlp', feat_dim=128, num_classes=10, **kwargs):
+        super(PretrainedSupConResNet, self).__init__()
+        if name == 'resnet50':
+            self.model = models.resnet50(num_classes=num_classes)
+        else:
+            self.model = models.resnet18(num_classes=num_classes)
+        channels = kwargs.get('in_channel', 3)
+        self.model.conv1 = torch.nn.Conv2d(channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+
+        ##Weights init
+        nn.init.kaiming_normal_(self.model.conv1.weight, mode='fan_out', nonlinearity='relu')
+        
+        self.encoder = nn.Sequential(*list(self.model.children())[:-1])
+
+
+    def forward(self, x):
+        feat = self.encoder(x)
+        feat = torch.flatten(feat, 1)
+        
+        return feat
 
 
 class SupConGraphResNet(nn.Module):
@@ -282,17 +307,6 @@ class ClassificationHead(nn.Module):
         return x
 
 
-# class LinearClassifier(nn.Module):
-#     """Linear classifier"""
-#     def __init__(self, name='resnet50', num_classes=12):
-#         super(LinearClassifier, self).__init__()
-#         _, feat_dim = model_dict[name]
-#         self.fc = nn.Linear(feat_dim, num_classes)
-
-#     def forward(self, features):
-#         return self.fc(features)
-
-
 class ContrastiveModel(nn.Module):
     def __init__(self, 
                  base_model: str, 
@@ -301,7 +315,8 @@ class ContrastiveModel(nn.Module):
                  classification_head_kwargs=None,
                  norm_proj_head_input=False,
                  norm_class_head_input=False,
-                 model_name='resnet18'):
+                 model_name='resnet18',
+                 pretrained=False,):
         super(ContrastiveModel, self).__init__()
 
         self.norm_proj_head_input = norm_proj_head_input
@@ -309,11 +324,13 @@ class ContrastiveModel(nn.Module):
 
         assert encoder_kwargs is not None
         projection_head_kwargs = projection_head_kwargs or {}
-        classification_head_kwargs = classification_head_kwargs or {}
+        # classification_head_kwargs = classification_head_kwargs or {}
 
-        # self.encoder = create_model(**encoder_kwargs)
         if base_model == 'resnet':
-            self.encoder = SupConResNet(name=model_name, **encoder_kwargs) # resnet18 currently used resnet50, try out resnet18 next
+            if not pretrained:
+                self.encoder = SupConResNet(name=model_name, **encoder_kwargs) # resnet18 currently used resnet50, try out resnet18 next
+            else:
+                self.encoder = PretrainedSupConResNet(name=model_name, **encoder_kwargs)
         elif base_model == 'convnext':
             self.encoder = convnextv2_tiny(**encoder_kwargs) # the output features should have size (B, 768, 7, 7), so, just 768?
         else:
@@ -322,7 +339,6 @@ class ContrastiveModel(nn.Module):
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # print(x.shape)
         feature_embedding = self.encoder(x)
         normalized_embedding = F.normalize(feature_embedding, dim=1)
 

@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import glob
 from pathlib import Path
 import json
 import torch
@@ -27,6 +28,7 @@ from contrastive_classifier_trainer import ConClassTrainer
 from contrastive_gat_classifier_trainer import ConClassGraphTrainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
 from data.data import CellCropsDataset
+from data.orion_data_processing import load_cell_crops_from_orion
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
 from data.custom_samplers import TwoStageBalancedSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
@@ -51,7 +53,8 @@ def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classificat
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
         norm_proj_head_input=False,
-        model_name=model_name
+        model_name=model_name,
+        pretrained=True
     )
 
     return model
@@ -82,11 +85,17 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         #         {'params': model.projection_head.parameters(), 'lr': config['proj_lr'], "weight_decay": 0.0, 'name': 'projection_head'},],
         #         momentum=0.9,
         #         weight_decay=1e-4)
-        optimizer = optim.SGD(model.parameters(),
-                lr=config['lr'],
-                momentum=0.9,
-                weight_decay=1e-4)
+        # optimizer = optim.SGD(model.parameters(),
+        #         lr=config['lr'],
+        #         momentum=0.9,
+        #         weight_decay=1e-4)
         print("SGD with different LRs")
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=config['lr'],
+            weight_decay=config.get('weight_decay', 1e-4) #  1e-5
+        )
+        print("Adam")
 
     # # Learning rate scheduler
     # scheduler = optim.lr_scheduler.StepLR(
@@ -248,11 +257,6 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         print("No data augmentation applied")
     
     val_transform = create_validation_transform(crop_size=config['crop_input_size'])
-
-    # no_op_transform = torchvision.transforms.Compose([
-    #     torchvision.transforms.ToTensor(),
-    #     torchvision.transforms.Lambda(lambda x: x)
-    # ])
     
     # Create datasets
     if config['classifier']:
@@ -286,7 +290,7 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     print_dataset_stats(train_dataset, "Training")
     print_dataset_stats(val_dataset, "Validation")
     
-    train_dataset_labels = train_dataset._labels
+    # train_dataset_labels = train_dataset._labels
 
     # Create data loaders
     if config.get('cifar', False):
@@ -354,6 +358,56 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     return train_loader, val_loader
 
 
+def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
+    """
+    Create training and validation data loaders.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (train_loader, val_loader)
+    """
+    # In this case, we can get the image names by looping through the files instead for our situation: 
+    cell_patches_path = config["root_dir"]
+
+    # The data is numbered 00000
+    mask_name = "cell_masks"
+    img_patch_name = "image_patches"
+    labels_name = "meta"
+
+    # count
+    filelist = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
+
+    print("Loading testing data...")
+    test_crops = load_cell_crops_from_orion(cell_patches_path, mask_name, img_patch_name, labels_name, filelist)
+    # test_crops = load_samples(config, image_names, testing=True)
+    print(f"Loaded {len(test_crops)} testing samples")
+
+    # Create transforms
+    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    
+    # Create datasets
+    test_dataset = CellCropsDataset(
+        crops=test_crops,
+        transform=test_transform,
+        mask=use_mask
+    )
+    
+    # Create data loaders
+    use_graph = config.get('graph', False)
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config['batch_size'], #  1
+        shuffle=False,
+        num_workers=config['num_workers'],
+        pin_memory=True if torch.cuda.is_available() else False
+    )
+    
+    return test_loader
+
+
 def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = None, args=None):
     """
     Main training function.
@@ -397,7 +451,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet34' # 'convnextv2_tiny' resnet18
+    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet34 resnet18 resnet50
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -411,7 +465,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.7,
+        'dropout_rate': 0.5,
         'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(
@@ -444,8 +498,10 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
+    # 0.1 or 0.07 seems to perform best?
+    # and try switching back to resnet50
     if not args.classifier:
-        criterion = SupConLoss(temperature=0.13) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
+        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
             criterion = nn.CrossEntropyLoss(weight=class_weights) # 
@@ -473,7 +529,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         trainer = ContrastiveTrainer(
             model=model,
             train_loader=train_loader,
-            val_loader=val_loader,
+            val_loader=val_loader, # train_loader val_loader
             criterion=criterion,
             optimizer=optimizer,
             num_classes=config['num_classes'],
@@ -491,7 +547,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
                 encoder_ckpt_path=config["ckpt_path"],
                 classifier=classifier,
                 train_loader=train_loader,
-                val_loader=val_loader,
+                val_loader=val_loader, # train_loader val_loader
                 criterion=criterion,
                 optimizer=optimizer,
                 num_classes=config['num_classes'],

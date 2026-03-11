@@ -1,8 +1,9 @@
 {
     "crop_input_size": 64,
     "crop_size": 64,
-    "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/xenium/input/cellsighter_version",
-    "xenium_fold": "fold3",
+    "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_crc01_match5um_area50_3000/CRC01",
+    "xenium_fold": "fold5",
+    "orion": true,
     "train_set": [],
     "val_set": [],
     "test_set": [],
@@ -17,9 +18,10 @@
     "to_pad": false,
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": false,
-    "save_dir": "./con_classifier_testing_checkpoints",
-    "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/new_full_class_testing_results/second_testing_set/results_supcon_mask_aug_resnet50_1/best_model.pth",
-    "class_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/new_full_class_testing_results/second_testing_set/results_conclass_aug_mask_test1_resnet/best_model.pth",
+    "save_dir": "./con_classifier_testing_checkpoints_orion",
+    "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/all_supcon_testing_results/val_fix_new_testing_results/results_xenium_supcon_resnet34_test1/best_model.pth",
+    "class_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/all_supcon_testing_results/val_fix_new_testing_results/results_xenium_conclass_resnet34_test1/best_model.pth",
     "classifier": true,
-    "graph": false
+    "graph": false,
+    "simpler_labels": false
 }

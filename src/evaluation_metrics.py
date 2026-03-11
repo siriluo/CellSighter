@@ -21,6 +21,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 from matplotlib import pyplot as plt
 from PIL import Image
 from torch_geometric.loader import HGTLoader, NeighborLoader
+from data.utils import convert_to_simpler_labels
 
 
 # Local imports
@@ -320,26 +321,39 @@ class ConClassEvaluator:
                 with torch.no_grad():
                     features = self.encoder_model.encoder(images)
                 output = self.classifier(features.detach())
-                loss = self.criterion(output, labels)
+                # loss = self.criterion(output, labels)
 
-                losses.update(loss.item(), bsz)
+                # losses.update(loss.item(), bsz)
                 
                 # Get predictions and probabilities
                 probs = torch.softmax(output, dim=1)
+                
+                # Here, depending on num classes, convert labels and probabilities to the necessary amount.
 
                 if self.num_classes > 2:
-                    preds = probs.argmax(1)
+                    if self.config.get("simpler_labels", False):
+                        orig_preds = probs.argmax(1)
+                        preds = orig_preds.cpu().numpy()
+                        preds = [convert_to_simpler_labels(p) for p in preds]
+                        orig_labels = labels.cpu().numpy()
+                        labels = [convert_to_simpler_labels(l) for l in orig_labels]
+                    else:
+                        preds = probs.argmax(1)
+                        preds = preds.cpu().numpy()
+                        labels = labels.cpu().numpy()
                 else:
                     _, preds = torch.max(output, 1) # Need to convert to binary class labels?
                     preds_temp = preds.clone()
                     preds[preds_temp == bin_pos_label] = 0
                     preds[preds_temp != bin_pos_label] = 1
                     
+                    preds = preds.cpu().numpy()
+                    labels = labels.cpu().numpy()
                 
                 # Collect results
                 # running_loss += loss.item() * batch_size
-                all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
+                all_preds.extend(preds)
+                all_labels.extend(labels)
                 if self.num_classes <= 2:
                     all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
                 else:
@@ -388,6 +402,10 @@ class ConClassEvaluator:
             if self.num_classes <= 2:
                 auc = roc_auc_score(all_labels, all_probs)
             else:
+                # Fix the multi aucs
+                # if self.config.get("simpler_labels", False):
+                    # all_probs = [convert_to_simpler_labels(p) for p in all_probs]
+                
                 all_probs = np.vstack(all_probs)
                 
                 auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
@@ -426,7 +444,10 @@ class ConClassEvaluator:
         }
 
         if self.num_classes > 2:
-            multi_aucs_list = multi_aucs.tolist()
+            if isinstance(multi_aucs, list):
+                multi_aucs_list = multi_aucs
+            else:
+                multi_aucs_list = multi_aucs.tolist()
             results.update({'multi_class_aucs': multi_aucs_list})
         
         return results

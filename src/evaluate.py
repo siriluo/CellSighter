@@ -12,6 +12,7 @@ import torchvision
 from torch.utils.data import DataLoader, random_split
 from typing import Dict, Tuple, Any
 import numpy as np
+import glob
 from sklearn.utils.class_weight import compute_class_weight
 
 # Add src to Python path for imports
@@ -23,13 +24,14 @@ from evaluation_metrics import ConClassEvaluator
 from models import create_model, get_model_info
 from contrastive_learn_add import ContrastiveModel, ProjectionHead, ClassificationHead
 from gat_model import GATv2ClassificationHead
-from contrastive_trainer import ContrastiveTrainer
-from contrastive_classifier_trainer import ConClassTrainer
-from contrastive_gat_classifier_trainer import ConClassGraphTrainer
+# from contrastive_trainer import ContrastiveTrainer
+# from contrastive_classifier_trainer import ConClassTrainer
+# from contrastive_gat_classifier_trainer import ConClassGraphTrainer
 from data.utils import load_samples, create_training_transform, create_validation_transform
+from data.orion_data_processing import load_cell_crops_from_orion
 from data.data import CellCropsDataset
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
-from data.custom_samplers import TwoStageBalancedSampler
+# from data.custom_samplers import TwoStageBalancedSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from util.utils import TwoCropTransform
 
@@ -210,8 +212,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         image_names = file_names
 
     print("Loading testing data...")
-    # test_crops = load_samples(config, image_names, already_cropped=True, xenium=True)
-    test_crops = load_samples(config, image_names, testing=True)
+    test_crops = load_samples(config, image_names, already_cropped=True, testing=True)
+    # test_crops = load_samples(config, image_names, testing=True)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
@@ -221,6 +223,56 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     #     torchvision.transforms.ToTensor(),
     #     torchvision.transforms.Lambda(lambda x: x)
     # ])
+    
+    # Create datasets
+    test_dataset = CellCropsDataset(
+        crops=test_crops,
+        transform=test_transform,
+        mask=use_mask
+    )
+    
+    # Create data loaders
+    use_graph = config.get('graph', False)
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=config['batch_size'], #  1
+        shuffle=False,
+        num_workers=config['num_workers'],
+        pin_memory=True if torch.cuda.is_available() else False
+    )
+    
+    return test_loader
+
+
+def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
+    """
+    Create training and validation data loaders.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (train_loader, val_loader)
+    """
+    # In this case, we can get the image names by looping through the files instead for our situation: 
+    cell_patches_path = config["root_dir"]
+
+    # The data is numbered 00000
+    mask_name = "cell_masks"
+    img_patch_name = "image_patches"
+    labels_name = "meta"
+
+    # count
+    filelist = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
+
+    print("Loading testing data...")
+    test_crops = load_cell_crops_from_orion(cell_patches_path, mask_name, img_patch_name, labels_name, filelist)
+    # test_crops = load_samples(config, image_names, testing=True)
+    print(f"Loaded {len(test_crops)} testing samples")
+
+    # Create transforms
+    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
     
     # Create datasets
     test_dataset = CellCropsDataset(
@@ -271,10 +323,13 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     #     test_loader = create_contrastive_data_loaders(config)
     # else:
     #     train_loader, val_loader, test_loader = set_loader(config)
-    test_loader = create_contrastive_data_loaders(config)
+    
+    if not config.get("orion", False):
+        test_loader = create_contrastive_data_loaders(config)
+    else:
+        test_loader = create_orion_data_loaders(config)
+        
     # Get input channels from a sample
-    # sample_batch = next(iter(train_loader))
-
     if use_mask:
         input_channels = 5
     else:
@@ -286,15 +341,15 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet18
+    chosen_model = 'resnet34' # 'convnextv2_tiny' resnet18 resnet50 resnet34
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
     projection_head_kwargs = {
-        'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
+        'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34  2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
-        'use_batch_norm': False, # True False
+        'use_batch_norm': True, # True False
         'normalize_output': True
     }
     classification_head_kwargs = {
@@ -359,41 +414,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         json.dump(config, f, indent=2)
     print(f"Configuration saved to {config_save_path}")
     
-    # Create trainer
-    # use_graph = config.get('graph', False)
-    # if not use_graph:
-    #     trainer = ConClassTrainer(
-    #         model=model,
-    #         encoder_ckpt_path=config["ckpt_path"],
-    #         classifier=classifier,
-    #         train_loader=train_loader,
-    #         val_loader=val_loader,
-    #         criterion=criterion,
-    #         optimizer=optimizer,
-    #         num_classes=config['num_classes'],
-    #         scheduler=scheduler,
-    #         device=device,
-    #         save_dir=save_dir,
-    #         log_interval=config.get('log_interval', 50),
-    #         args=args
-    #     )
-    # else:
-    #     trainer = ConClassGraphTrainer(
-    #         model=model,
-    #         encoder_ckpt_path=config["ckpt_path"],
-    #         classifier=classifier,
-    #         train_loader=train_loader,
-    #         val_loader=val_loader,
-    #         criterion=criterion,
-    #         optimizer=optimizer,
-    #         num_classes=config['num_classes'],
-    #         scheduler=scheduler,
-    #         device=device,
-    #         save_dir=save_dir,
-    #         log_interval=config.get('log_interval', 50),
-    #         args=args
-    #     )
-
     evaluator = ConClassEvaluator(
         model=model,
         encoder_ckpt_path=config["ckpt_path"],
@@ -409,7 +429,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         args=args,
         config=config
     )
-
     
     eval_results = {}
     # Detailed evaluation
