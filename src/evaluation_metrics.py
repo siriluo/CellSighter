@@ -278,6 +278,7 @@ class ConClassEvaluator:
         running_loss = 0.0
         all_preds = []
         all_labels = []
+        all_orig_labels = []
         all_probs = []
         
         list_of_logits = []
@@ -334,9 +335,10 @@ class ConClassEvaluator:
                     if self.config.get("simpler_labels", False):
                         orig_preds = probs.argmax(1)
                         preds = orig_preds.cpu().numpy()
-                        preds = [convert_to_simpler_labels(p) for p in preds]
+                        # preds = [convert_to_simpler_labels(p) for p in preds]
                         orig_labels = labels.cpu().numpy()
                         labels = [convert_to_simpler_labels(l) for l in orig_labels]
+                        all_orig_labels.extend(orig_labels)
                     else:
                         preds = probs.argmax(1)
                         preds = preds.cpu().numpy()
@@ -404,8 +406,8 @@ class ConClassEvaluator:
             else:
                 # Fix the multi aucs
                 # if self.config.get("simpler_labels", False):
-                    # all_probs = [convert_to_simpler_labels(p) for p in all_probs]
-                
+                #     all_labels = all_orig_labels
+                    
                 all_probs = np.vstack(all_probs)
                 
                 auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')

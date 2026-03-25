@@ -370,6 +370,9 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = config["root_dir"]
+    
+    crc_samples = ["CRC01"]
+    val_crc_sample = "CRC07"
 
     # The data is numbered 00000
     mask_name = "cell_masks"
@@ -377,26 +380,73 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     labels_name = "meta"
 
     # count
-    filelist = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
-
     print("Loading testing data...")
-    test_crops = load_cell_crops_from_orion(cell_patches_path, mask_name, img_patch_name, labels_name, filelist)
+    training_crops = []
+    for sample in crc_samples:
+        filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
+        crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
+        training_crops.extend(crops)
+
+    # maybe use the last 10 files for validation and the rest for training?
+    validation_filelist = glob.glob(f"{cell_patches_path}/{val_crc_sample}/{labels_name}_*.csv")
+    
+    test_crops = []
+    test_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{val_crc_sample}", mask_name, img_patch_name, labels_name, validation_filelist)
     # test_crops = load_samples(config, image_names, testing=True)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
+    if config.get('aug', False):
+        train_transform = create_training_transform(
+            crop_size=config['crop_input_size'], # crop_input_size crop_size potentially replace with config['crop_input_size']
+            shift=config.get('shift', 5),
+            mask=use_mask,
+        )
+        print("Using data augmentation for training")
+    else:
+        train_transform = create_validation_transform(crop_size=config['crop_size'])
+        print("No data augmentation applied")
+        
     test_transform = create_validation_transform(crop_size=config['crop_input_size'])
     
     # Create datasets
-    test_dataset = CellCropsDataset(
-        crops=test_crops,
-        transform=test_transform,
-        mask=use_mask
-    )
+    if config['classifier']:
+        train_dataset = CellCropsDataset(
+            crops=training_crops,
+            transform=train_transform,
+            mask=use_mask,
+            contrastive=False,
+        )
+        test_dataset = CellCropsDataset(
+            crops=test_crops,
+            transform=test_transform,
+            mask=use_mask,
+            contrastive=False,
+        )
+    else:
+        train_dataset = CellCropsDataset(
+            crops=training_crops,
+            transform=TwoCropTransform(train_transform),
+            mask=use_mask,
+            contrastive=True,
+        )
+        test_dataset = CellCropsDataset(
+            crops=test_crops,
+            transform=TwoCropTransform(test_transform),
+            mask=use_mask,
+            contrastive=True,
+        )
     
     # Create data loaders
     use_graph = config.get('graph', False)
 
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        num_workers=config['num_workers'],
+        pin_memory=True if torch.cuda.is_available() else False
+    )
     test_loader = DataLoader(
         test_dataset,
         batch_size=config['batch_size'], #  1
@@ -405,7 +455,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
         pin_memory=True if torch.cuda.is_available() else False
     )
     
-    return test_loader
+    return train_loader, test_loader
 
 
 def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = None, args=None):
@@ -433,7 +483,10 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create data loaders
     if (not args.cifar) or (not args.classifier):
-        train_loader, val_loader = create_contrastive_data_loaders(config)
+        if not config.get("orion", False):
+            train_loader, val_loader = create_contrastive_data_loaders(config)
+        else: 
+            train_loader, val_loader = create_orion_data_loaders(config)
         test_loader = None
     else:
         train_loader, val_loader, test_loader = set_loader(config)
@@ -465,7 +518,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.5,
+        'dropout_rate': 0.2,
         'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(

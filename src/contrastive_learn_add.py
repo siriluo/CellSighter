@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+import timm
 from typing import Dict, Any, Optional, Union
 from models import create_model
 from gat_model import GraphAttentionLayer
@@ -198,15 +199,36 @@ class SupConResNet(nn.Module):
         # feat = F.normalize(self.head(feat), dim=1)
         return feat
     
+    
+class SupConViT(nn.Module):
+    """backbone + projection head"""
+    def __init__(self, name='vit_base_patch16_224', head='mlp', feat_dim=128, **kwargs):
+        super(SupConViT, self).__init__()
+        model_fun, dim_in = model_dict[name]
+        self.encoder = model_fun(**kwargs)
+        vit = timm.create_model(
+                'vit_base_patch16_224.mae',
+                pretrained=True,
+                num_classes=0,  # remove classifier nn.Linear
+            )
+
+
+    def forward(self, x):
+        feat = self.encoder(x)
+
+        return feat
+    
 
 class PretrainedSupConResNet(nn.Module):
     """backbone + projection head"""
     def __init__(self, name='resnet50', head='mlp', feat_dim=128, num_classes=10, **kwargs):
         super(PretrainedSupConResNet, self).__init__()
         if name == 'resnet50':
-            self.model = models.resnet50(num_classes=num_classes)
+            self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+            # self.model = timm.create_model('resnet50', pretrained=True, num_classes=num_classes)
         else:
-            self.model = models.resnet18(num_classes=num_classes)
+            self.model = models.resnet18(weights='DEFAULT')
+            # self.model = timm.create_model('resnet18', pretrained=True, num_classes=num_classes)
         channels = kwargs.get('in_channel', 3)
         self.model.conv1 = torch.nn.Conv2d(channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
 

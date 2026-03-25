@@ -54,7 +54,8 @@ def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classificat
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
         norm_proj_head_input=False,
-        model_name=model_name
+        model_name=model_name,
+        pretrained=True
     )
 
     return model
@@ -193,36 +194,37 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         Tuple of (train_loader, val_loader)
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
-    folds = [config.get("xenium_fold", None)]
+    use_xenium = config.get("xenium", False)
     
-    if folds[0] is not None:
-        root_dir = config["root_dir"]
-        for fold in folds:
-            fold_path = f"{root_dir}/CellTypes/cells2labels/{fold}"
+    if use_xenium:
+        folds = [config.get("xenium_fold", None)]
+        
+        if folds[0] is not None:
+            root_dir = config["root_dir"]
+            for fold in folds:
+                fold_path = f"{root_dir}/CellTypes/cells2labels/{fold}"
 
-            fold_file_names = os.listdir(fold_path)
-            fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in fold_file_names if os.path.isfile(fold_path + "/" + f)]
-        image_names = fold_file_names
+                fold_file_names = os.listdir(fold_path)
+                fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in fold_file_names if os.path.isfile(fold_path + "/" + f)]
+            image_names = fold_file_names
+        else:
+            root_dir = config["root_dir"]
+            file_name_path = f"{root_dir}/CellTypes/cells2labels"
+
+            file_names = os.listdir(file_name_path)
+            file_names = [f"{f.split('.')[0]}" for f in file_names if os.path.isfile(file_name_path + "/" + f)]
+            image_names = file_names
     else:
-        root_dir = config["root_dir"]
-        file_name_path = f"{root_dir}/CellTypes/cells2labels"
+        image_names = config['test_set'] 
 
-        file_names = os.listdir(file_name_path)
-        file_names = [f"{f.split('.')[0]}" for f in file_names if os.path.isfile(file_name_path + "/" + f)]
-        image_names = file_names
 
     print("Loading testing data...")
-    test_crops = load_samples(config, image_names, already_cropped=True, testing=True)
+    test_crops = load_samples(config, image_names, already_cropped=use_xenium, testing=use_xenium)
     # test_crops = load_samples(config, image_names, testing=True)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
     test_transform = create_validation_transform(crop_size=config['crop_input_size'])
-
-    # no_op_transform = torchvision.transforms.Compose([
-    #     torchvision.transforms.ToTensor(),
-    #     torchvision.transforms.Lambda(lambda x: x)
-    # ])
     
     # Create datasets
     test_dataset = CellCropsDataset(
@@ -230,6 +232,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
         transform=test_transform,
         mask=use_mask
     )
+    
+    print_dataset_stats(test_dataset, "Testing")
     
     # Create data loaders
     use_graph = config.get('graph', False)
@@ -243,6 +247,48 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     )
     
     return test_loader
+
+
+# def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
+#     """
+#     Create training and validation data loaders.
+    
+#     Args:
+#         config: Configuration dictionary
+        
+#     Returns:
+#         Tuple of (train_loader, val_loader)
+#     """
+#     use_xenium = config.get("xenium", False)
+
+#     val_image_names = config['val_set'] 
+    
+#     print("Loading validation data...")
+#     val_crops = load_samples(config, val_image_names, already_cropped=use_xenium, testing=use_xenium)
+#     print(f"Loaded {len(val_crops)} validation samples")
+    
+#     # Create transforms
+#     val_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    
+#     # Create datasets
+#     val_dataset = CellCropsDataset(
+#         crops=val_crops,
+#         transform=val_transform,
+#         mask=use_mask
+#     )
+    
+#     # Print dataset statistics
+#     print_dataset_stats(val_dataset, "Validation")
+    
+#     val_loader = DataLoader(
+#         val_dataset,
+#         batch_size=config['batch_size'], #  1
+#         shuffle=False,
+#         num_workers=config['num_workers'],
+#         pin_memory=True if torch.cuda.is_available() else False
+#     )
+    
+#     return train_loader, val_loader
 
 
 def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
@@ -341,7 +387,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet34' # 'convnextv2_tiny' resnet18 resnet50 resnet34
+    chosen_model = 'resnet18' # 'convnextv2_tiny' resnet18 resnet50 resnet34
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -355,7 +401,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.7,
+        'dropout_rate': 0.5,
         'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(

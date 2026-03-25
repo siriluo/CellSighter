@@ -220,6 +220,7 @@ def load_image(image_path: str,
     # Load cell labels
     if cells2labels_path.endswith(".npz"):
         cells2labels = np.load(cells2labels_path, allow_pickle=True)['data'].astype(np.int32)
+        cells2labels = cells2labels.flatten()
     else:
         with open(cells2labels_path, "r") as f:
             cells2labels = np.array(f.read().strip().split('\n')).astype(float).astype(int)
@@ -322,7 +323,8 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
             objs = np.arange(1, num_unique_cells)  # cell ids start from 1
         
         if not testing:
-            coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
+            # coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
+            coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed/{image_id}_cell_info.csv"
         else:
             coords_crc_path = None
 
