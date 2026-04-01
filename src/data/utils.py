@@ -12,6 +12,8 @@ import numpy as np
 import torchvision
 import scipy.ndimage as ndimage
 import torch 
+import torch.nn as nn
+import torch.optim as optim
 from typing import List, Tuple, Dict, Any, Optional, Callable
 from torchvision.transforms import Lambda
 import cv2
@@ -172,6 +174,116 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
             #     torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
             # ], p=0.8),
         ])
+
+
+def set_backbone_trainability(model: nn.Module, trainable: bool):
+    for p in model.rgb_encoder.parameters():
+        p.requires_grad = trainable
+
+
+def unfreeze_last_vit_blocks(model: nn.Module, n_last_blocks: int = 2):
+    """
+    For timm DINOv2 ViT (e.g., vit_base_patch14_dinov2.lvd142m):
+    unfreezes only the last n transformer blocks + final norm.
+    """
+    set_backbone_trainability(model, False)
+
+    # timm ViT usually has model.rgb_encoder.blocks
+    blocks = model.rgb_encoder.blocks
+    for blk in blocks[-n_last_blocks:]:
+        for p in blk.parameters():
+            p.requires_grad = True
+
+    if hasattr(model.rgb_encoder, "norm"):
+        for p in model.rgb_encoder.norm.parameters():
+            p.requires_grad = True
+
+
+def unfreeze_resnet_layer4(model: nn.Module):
+    """
+    For torchvision ResNet18/50:
+    unfreezes only layer4 (+ optional fc is already Identity in your model).
+    """
+    set_backbone_trainability(model, False)
+
+    for p in model.rgb_encoder.layer4.parameters():
+        p.requires_grad = True
+
+
+def build_optimizer_stage1(model: nn.Module, head_lr=1e-3, weight_decay=1e-4):
+    """
+    Stage 1: backbone frozen, train heads only.
+    """
+    set_backbone_trainability(model, False)
+
+    head_params = []
+    for m in [model.mask_branch, model.fusion, model.projector, model.classifier]:
+        head_params += list(m.parameters())
+
+    optimizer = torch.optim.AdamW(
+        [{"params": [p for p in head_params if p.requires_grad], "lr": head_lr, "weight_decay": weight_decay}],
+    )
+    return optimizer
+
+
+def build_optimizer_stage2(
+    model: nn.Module,
+    backbone_type: str,          # "vit" or "resnet"
+    head_lr=1e-3,
+    backbone_lr=1e-4,            # ~10x smaller than head LR
+    weight_decay=1e-4,
+    n_last_vit_blocks=2,
+):
+    """
+    Stage 2: partial unfreeze
+    - ViT: last n blocks
+    - ResNet: layer4
+    """
+    if backbone_type == "vit":
+        unfreeze_last_vit_blocks(model, n_last_blocks=n_last_vit_blocks)
+    elif backbone_type == "resnet":
+        unfreeze_resnet_layer4(model)
+    else:
+        raise ValueError("backbone_type must be 'vit' or 'resnet'")
+
+    # Parameter groups
+    head_modules = [model.mask_branch, model.fusion, model.projector, model.classifier]
+    head_params = []
+    for m in head_modules:
+        head_params += [p for p in m.parameters() if p.requires_grad]
+
+    backbone_params = [p for p in model.rgb_encoder.parameters() if p.requires_grad]
+
+    optimizer = torch.optim.AdamW(
+        [
+            {"params": head_params, "lr": head_lr, "weight_decay": weight_decay},
+            {"params": backbone_params, "lr": backbone_lr, "weight_decay": weight_decay},
+        ],
+        betas=(0.9, 0.999),
+    )
+    return optimizer
+
+
+def topk_accuracy(logits: torch.Tensor, targets: torch.Tensor, ks=(1, 3, 5)):
+    """
+    logits:  [B, C]
+    targets: [B] (class indices)
+    """
+    maxk = min(max(ks), logits.size(1))
+    values, pred = logits.topk(maxk, dim=1, largest=True, sorted=True)   # [B, maxk]
+    pred = pred.t()                                                  # [maxk, B]
+    correct = pred.eq(targets.view(1, -1).expand_as(pred))          # [maxk, B]
+
+    out = {}
+    for k in ks:
+        k = min(k, logits.size(1))
+        correct_k = correct[:k].any(dim=0).float().mean() * 100.0
+        out[f"top{k}"] = correct_k.item()
+        
+    out[f"topk_values"] = values.cpu().numpy().tolist()
+    out[f"topk_preds"] = pred.cpu().numpy().tolist()
+     
+    return out
 
 
 def convert_to_simpler_labels(label): 

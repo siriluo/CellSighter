@@ -21,7 +21,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 from matplotlib import pyplot as plt
 from PIL import Image
 from torch_geometric.loader import HGTLoader, NeighborLoader
-from data.utils import convert_to_simpler_labels
+from data.utils import convert_to_simpler_labels, topk_accuracy
 
 
 # Local imports
@@ -371,6 +371,12 @@ class ConClassEvaluator:
         # Calculate metrics
         avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
         accuracy = accuracy_score(all_labels, all_preds)
+
+        topk_accs = topk_accuracy(all_preds, all_labels, ks=[1, 3, 5])
+        
+        save_path = self.config.get('save_dir', './test_checkpoints')
+        with open(f"{save_path}/topk_accs.json", 'w') as f:
+            json.dump(topk_accs, f, indent=4)
 
         if self.num_classes <= 2:
             average_method = 'binary'

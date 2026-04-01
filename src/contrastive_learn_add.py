@@ -166,6 +166,11 @@ model_dict = {
 }
 
 
+##
+# Resnets above
+##
+
+
 class LinearBatchNorm(nn.Module):
     """Implements BatchNorm1d by BatchNorm2d, for SyncBN purpose"""
     def __init__(self, dim, affine=True):
@@ -217,6 +222,104 @@ class SupConViT(nn.Module):
         feat = self.encoder(x)
 
         return feat
+  
+  
+class MaskBranch(nn.Module):
+    # Encodes 2 masks: center-cell + neighbor-cell
+    def __init__(self, in_ch: int = 2, out_dim: int = 128):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(in_ch, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d(1),
+        )
+        self.fc = nn.Linear(64, out_dim)
+
+    def forward(self, center_mask, neighbor_mask):
+        m = torch.cat([center_mask, neighbor_mask], dim=1)  # [B,2,H,W]
+        x = self.encoder(m).flatten(1)
+        x = self.fc(x)
+        return x
+    
+    
+class HEFusedContrastiveModel(nn.Module):
+    """
+    RGB backbone (DINOv2 ViT-B/14 or ResNet50) + mask branch fusion + SupCon projection head.
+    """
+    def __init__(
+        self,
+        backbone: str = "dinov2_vitb14",  # "dinov2_vitb14" | "resnet50" | "resnet18"
+        pretrained: bool = True,
+        freeze_backbone: bool = False,
+        mask_feat_dim: int = 128,
+        fusion_dim: int = 512,
+        # proj_dim: int = 128,
+    ):
+        super().__init__()
+
+        # 1) RGB image encoder
+        if backbone == "dinov2_vitb14":
+            if timm is None:
+                raise ImportError("Please install timm: pip install timm")
+            # timm model name can vary by timm version; this is the common one:
+            self.rgb_encoder = timm.create_model(
+                "vit_base_patch14_dinov2.lvd142m",
+                pretrained=pretrained,
+                num_classes=0,  # return features
+            )
+            rgb_dim = self.rgb_encoder.num_features
+
+        elif backbone == "resnet50":
+            w = models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
+            m = models.resnet50(weights=w)
+            rgb_dim = m.fc.in_features
+            m.fc = nn.Identity()
+            self.rgb_encoder = m
+
+        elif backbone == "resnet18":
+            w = models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+            m = models.resnet18(weights=w)
+            rgb_dim = m.fc.in_features
+            m.fc = nn.Identity()
+            self.rgb_encoder = m
+        else:
+            raise ValueError(f"Unsupported backbone: {backbone}")
+
+        if freeze_backbone:
+            for p in self.rgb_encoder.parameters():
+                p.requires_grad = False
+
+        # 2) Mask encoder
+        self.mask_branch = MaskBranch(in_ch=2, out_dim=mask_feat_dim)
+
+        # 3) Fusion + projection
+        self.fusion = nn.Sequential(
+            nn.Linear(rgb_dim + mask_feat_dim, fusion_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+        )
+        # self.projector = ProjectionHead(fusion_dim, hidden_dim=fusion_dim, out_dim=proj_dim)
+
+        # Optional classifier head for joint training/eval
+        # self.classifier = nn.Linear(fusion_dim, 1)
+
+    def forward(self, rgb, center_mask, neighbor_mask, return_features=False):
+        """
+        rgb:           [B, 3, H, W]
+        center_mask:   [B, 1, H, W]
+        neighbor_mask: [B, 1, H, W]
+        """
+        rgb_feat = self.rgb_encoder(rgb)                # [B, rgb_dim]
+        mask_feat = self.mask_branch(center_mask, neighbor_mask)  # [B, mask_feat_dim]
+        feat = self.fusion(torch.cat([rgb_feat, mask_feat], dim=1))  # [B, fusion_dim]
+        # z = self.projector(feat)                        # [B, proj_dim], normalized
+
+        # if return_features:
+        #     return {"z": z, "feat": feat, "logit": self.classifier(feat)}
+        return feat
     
 
 class PretrainedSupConResNet(nn.Module):
@@ -267,17 +370,28 @@ class SupConGraphResNet(nn.Module):
 
 
 # Set up the contrastive learning code separately from the regular training code.
+class ProjectionHeadSimp(nn.Module):
+    # 2-layer MLP projection head (standard for SupCon)
+    def __init__(self, in_dim: int, hidden_dim: int = 512, out_dim: int = 128, dropout: float = 0.0):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, out_dim),
+        )
+
+    def forward(self, x):
+        z = self.net(x)
+        return F.normalize(z, dim=1)  # normalized embeddings for contrastive loss
+    
+    
 class ProjectionHead(nn.Module):    
     def __init__(self,
         feature_dims=(2048, 128),
         activation=nn.ReLU(),
-        # kernel_initializer=tf.random_normal_initializer(stddev=.01),
-        # bias_initializer=tf.zeros_initializer(),
         use_batch_norm=False,
         normalize_output=True,
-    #    batch_norm_momentum=blocks.BATCH_NORM_MOMENTUM,
-    #    use_batch_norm_beta=False,
-    #    use_global_batch_norm=True,
         **kwargs):
         super(ProjectionHead, self).__init__(**kwargs)
 
@@ -306,6 +420,24 @@ class ProjectionHead(nn.Module):
         x = F.normalize(x, dim=1)
 
         return x
+
+class ClassificationHead2(nn.Module):
+    def __init__(self, in_dim, n_classes, p=0.3):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, 512),
+            nn.GELU(),
+            nn.Dropout(p),
+            nn.Linear(512, 128),
+            nn.GELU(),
+            nn.Dropout(p),
+            nn.Linear(128, n_classes),
+        )
+
+    def forward(self, feat):
+        x = self.classifier(feat)
+        return x   # logits
 
 
 class ClassificationHead(nn.Module):
@@ -355,6 +487,13 @@ class ContrastiveModel(nn.Module):
                 self.encoder = PretrainedSupConResNet(name=model_name, **encoder_kwargs)
         elif base_model == 'convnext':
             self.encoder = convnextv2_tiny(**encoder_kwargs) # the output features should have size (B, 768, 7, 7), so, just 768?
+        elif base_model == 'new_fused':
+            # pretrained: bool = True,
+            # freeze_backbone: bool = False,
+            # mask_feat_dim: int = 128,
+            # fusion_dim: int = 512,
+            # **encoder_kwargs, 
+            self.encoder = HEFusedContrastiveModel(backbone='dinov2_vitb14', mask_feat_dim=128, fusion_dim=512) 
         else:
             raise ValueError(f'encoder model: {base_model} not recognized.')
         self.projection_head = ProjectionHead(**projection_head_kwargs)

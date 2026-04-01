@@ -1,7 +1,8 @@
 {
-  "crop_input_size": 60,
+  "crop_input_size": 64,
   "crop_size": 128,
-  "root_dir": "/projects/illinois/vetmed/cb/kwang222/processed_cia_crc_ffpe_data/cellsighter_processed/datasets/new_ct_categories_cellpose_seg_removed_2",
+  "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000",
+  "orion": true,
   "train_set": [
     "reg001_A",
     "reg002_A",
@@ -140,10 +141,10 @@
   ],
   "num_classes": 10,
   "epoch_max": 100,
-  "lr": 5,
-  "proj_lr": 0.01,
+  "lr": 0.0001,
+  "proj_lr": 0.0001,
   "batch_size": 512,
-  "num_workers": 4,
+  "num_workers": 12,
   "weight_to_eval": "",
   "sample_batch": false,
   "to_pad": false,
@@ -152,9 +153,8 @@
     "1": "tumor cells"
   },
   "aug": true,
-  "save_dir": "./cifar10_con_classifier_checkpoints",
-  "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/cifar10_contrastive_checkpoints/best_model.pth",
+  "save_dir": "./contrastive_classifier_checkpoints_orion",
+  "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_checkpoints/best_model.pth",
   "classifier": true,
-  "graph": false,
-  "cifar": true
+  "graph": false
 }

@@ -26,7 +26,7 @@ from gat_model import GATv2ClassificationHead
 from contrastive_trainer import ContrastiveTrainer
 from contrastive_classifier_trainer import ConClassTrainer
 from contrastive_gat_classifier_trainer import ConClassGraphTrainer
-from data.utils import load_samples, create_training_transform, create_validation_transform
+from data.utils import load_samples, create_training_transform, create_validation_transform, build_optimizer_stage1
 from data.data import CellCropsDataset
 from data.orion_data_processing import load_cell_crops_from_orion
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
@@ -73,11 +73,17 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     # else:
 
     if config['classifier']:
-        optimizer = optim.SGD(model.parameters(),
-                        lr=config['lr'],
-                        momentum=0.9,
-                        weight_decay=1e-4)
-        print("SGD")
+        # optimizer = optim.SGD(model.parameters(),
+        #                 lr=config['lr'],
+        #                 momentum=0.9,
+        #                 weight_decay=1e-4)
+        # print("SGD")
+        optimizer = optim.Adam(
+            model.parameters(),
+            lr=config['lr'],
+            weight_decay=config.get('weight_decay', 1e-4) #  1e-5
+        )
+        print("Adam")
     else:
         ## Test optimizer with multiple LRs
         # optimizer = optim.SGD([
@@ -89,13 +95,20 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         #         lr=config['lr'],
         #         momentum=0.9,
         #         weight_decay=1e-4)
-        print("SGD with different LRs")
+        # print("SGD with different LRs")
         optimizer = optim.Adam(
             model.parameters(),
             lr=config['lr'],
             weight_decay=config.get('weight_decay', 1e-4) #  1e-5
         )
         print("Adam")
+        
+    if config.get('pretrained_test', False):
+        optimizer = build_optimizer_stage1(
+            model,
+            head_lr=1e-3,
+            weight_decay=1e-4,
+        )
 
     # # Learning rate scheduler
     # scheduler = optim.lr_scheduler.StepLR(
@@ -371,7 +384,8 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = config["root_dir"]
     
-    crc_samples = ["CRC01"]
+    crc_samples = ["CRC01", "CRC02", "CRC04", "CRC05", "CRC06", "CRC09", "CRC10", "CRC11", "CRC12", "CRC13", 
+                   "CRC14", "CRC15", "CRC16", "CRC17", "CRC18", "CRC19", "CRC20"] # , "CRC04"
     val_crc_sample = "CRC07"
 
     # The data is numbered 00000

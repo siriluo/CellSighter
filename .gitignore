@@ -62,6 +62,7 @@ logs/
 *.log
 *.o*
 *.e*
+*.sbatch
 src/data/cifar_10/cifar-10-python.tar.gz
 src/data/cifar_10/cifar-10-batches-py/batches.meta
 src/data/cifar_10/cifar-10-batches-py/data_batch_1
@@ -164,3 +165,8 @@ ct_class_training_job.sbatch
 ct_class_training_job.sbatch
 ct_class_training_job_nonbin_con_classifier_cifar.sbatch
 ct_class_training_job_nonbin_contrastive_cifar.sbatch
+ct_class_eval_deltaai.sbatch
+ct_class_training_job_nonbin_con_classifier_deltaai.sbatch
+ct_class_training_job_nonbin_contrastive_deltaai.sbatch
+ct_class_training_job.sbatch
+ct_class_training_job.sbatch

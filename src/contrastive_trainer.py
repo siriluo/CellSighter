@@ -23,7 +23,7 @@ from matplotlib import pyplot as plt
 # Local imports
 from models import create_model, get_model_info
 from trainer import Trainer
-from data.utils import load_samples, create_training_transform, create_validation_transform
+from data.utils import load_samples, create_training_transform, create_validation_transform, build_optimizer_stage2
 from data.data import CellCropsDataset
 from train import create_data_loaders, load_config, calculate_class_weights, create_optimizer_and_scheduler
 from contrastive_learn_add import ContrastiveModel
@@ -199,7 +199,7 @@ class ContrastiveTrainer:
 
     def train_epoch(self, train_loader, model, criterion, optimizer, epoch): # , opt
         """one epoch training"""
-        model.train()
+        # model.train()
 
         batch_time = AverageMeter()
         data_time = AverageMeter()
@@ -271,7 +271,6 @@ class ContrastiveTrainer:
 
         return losses.avg
 
-
     def validate(self) -> Dict[str, float]:
         """
         Validate the model on validation set.
@@ -329,6 +328,88 @@ class ContrastiveTrainer:
         return metrics
 
 
+    def train_pretrained(self, num_epochs: int, early_stopping_patience: int = 10) -> Dict[str, List]:
+        """
+        Train the model for multiple epochs.
+        
+        Args:
+            num_epochs: Number of epochs to train
+            early_stopping_patience: Stop training if no improvement for this many epochs
+            
+        Returns:
+            Training history dictionary
+        """
+        print(f"Starting training for {num_epochs} epochs...")
+        print(f"Device: {self.device}")
+        print(f"Model: {self.model.__class__.__name__}")
+
+        if torch.cuda.is_available():
+            print(torch.cuda.memory_summary())
+        else:
+            print("CUDA is not available.")
+        
+        epochs_without_improvement = 0
+        start_time = time.time()
+        
+        for epoch in range(num_epochs):
+            # for cifar test set
+            adjust_learning_rate(self.args, self.optimizer, epoch)
+
+            if epoch == 10:
+                optimizer = build_optimizer_stage2(
+                    self.model,
+                    backbone_type="vit",      # "resnet" if using ResNet18/50
+                    head_lr=5e-4,
+                    backbone_lr=5e-5,         # 10x lower
+                    weight_decay=1e-4,
+                    n_last_vit_blocks=2,      # try 1-3
+                )
+                self.optimizer = optimizer
+
+            epoch_start_time = time.time()
+            
+            # Training
+            train_loss = self.train_epoch(self.train_loader, self.model, self.criterion, self.optimizer, epoch + 1) # , train_acc 
+            
+            # Validation
+            val_metrics = self.validate()
+            
+            # Record history
+            self.history['train_loss'].append(train_loss)
+            self.history['val_loss'].append(val_metrics['loss'])
+            
+            # Print epoch results
+            epoch_time = time.time() - epoch_start_time
+            print(f'\nEpoch {epoch + 1}/{num_epochs} - {epoch_time:.2f}s')
+            print(f'Train Loss: {train_loss:.4f}') # , Train Acc: {train_acc:.4f}
+            print(f'Val Loss: {val_metrics["loss"]:.4f}') # , Val Acc: {val_metrics["accuracy"]:.4f}
+            
+            # Check for best model
+            if val_metrics['loss'] < self.best_val_loss:
+                self.best_val_loss = val_metrics['loss']
+                self.best_epoch = epoch + 1
+                epochs_without_improvement = 0
+                
+                # Save best model
+                self.save_checkpoint(epoch + 1, is_best=True)
+            else:
+                epochs_without_improvement += 1
+            
+            # Save regular checkpoint
+            if (epoch + 1) % 10 == 0:
+                self.save_checkpoint(epoch + 1, is_best=False)
+            
+            print('-' * 60)
+        
+        total_time = time.time() - start_time
+        print(f'\nTraining completed in {total_time:.2f}s')
+        
+        # Save final history
+        self.save_history()
+        
+        return self.history
+
+
     def train(self, num_epochs: int, early_stopping_patience: int = 10) -> Dict[str, List]:
         """
         Train the model for multiple epochs.
@@ -359,6 +440,7 @@ class ContrastiveTrainer:
             epoch_start_time = time.time()
             
             # Training
+            self.model.train()
             train_loss = self.train_epoch(self.train_loader, self.model, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
             # Validation
