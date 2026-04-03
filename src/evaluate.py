@@ -387,7 +387,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet18' # 'convnextv2_tiny' resnet18 resnet50 resnet34
+    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet18 resnet50 resnet34
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -420,7 +420,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             classifier = GATv2ClassificationHead(**classification_head_kwargs)
 
         if config["class_path"] is not None:
-            state_dict = torch.load(config["class_path"])
+            state_dict = torch.load(config["class_path"], weights_only=False)
             classifier.load_state_dict(state_dict['model_state_dict'])
             print("Loaded classifier weights from checkpoint")
 

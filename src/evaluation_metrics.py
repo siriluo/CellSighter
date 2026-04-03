@@ -362,8 +362,8 @@ class ConClassEvaluator:
                     all_probs.append(probs.cpu().numpy())
                 
                 # list_of_probs.append(probs.cpu().numpy().tolist())
-                # list_of_logits.append(output.cpu().numpy().tolist())
-                # list_of_labels.append(labels.cpu().numpy().tolist())
+                list_of_logits.append(output.cpu().numpy().tolist())
+                list_of_labels.append(labels.tolist())
         
         # For the mapping, tumor cells are class 7 (index 7).
         
@@ -372,7 +372,9 @@ class ConClassEvaluator:
         avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
         accuracy = accuracy_score(all_labels, all_preds)
 
-        topk_accs = topk_accuracy(all_preds, all_labels, ks=[1, 3, 5])
+        list_of_logits = torch.tensor(list_of_logits).squeeze(1)
+        list_of_labels = torch.tensor(list_of_labels).squeeze(1)
+        topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
         
         save_path = self.config.get('save_dir', './test_checkpoints')
         with open(f"{save_path}/topk_accs.json", 'w') as f:

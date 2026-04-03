@@ -1,7 +1,7 @@
 {
   "crop_input_size": 64,
   "crop_size": 128,
-  "root_dir": "/projects/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/crc_codex_better_masks",
+  "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/crc_codex_better_masks",
   "orion": false,
   "train_set": [
     "reg001_A",
@@ -142,9 +142,9 @@
   "num_classes": 10,
   "epoch_max": 120,
   "lr": 0.0005,
-  "proj_lr": 0.0005,
-  "batch_size": 2048,
-  "num_workers": 12,
+  "proj_lr": 0.001,
+  "batch_size": 1024,
+  "num_workers": 16,
   "weight_to_eval": "",
   "sample_batch": false,
   "to_pad": false,
@@ -156,5 +156,6 @@
   "save_dir": "./contrastive_checkpoints",
   "ckpt_path": "",
   "classifier": false,
-  "graph": false
+  "graph": false,
+  "pretrained_test": true
 }

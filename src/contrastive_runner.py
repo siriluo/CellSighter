@@ -44,6 +44,7 @@ model_dict = {
     'resnet50': 2048,
     'resnet101': 2048,
     'convnextv2_tiny': 768,
+    'new_fused': 512
 }
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
@@ -106,7 +107,7 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     if config.get('pretrained_test', False):
         optimizer = build_optimizer_stage1(
             model,
-            head_lr=1e-3,
+            head_lr=config['proj_lr'],
             weight_decay=1e-4,
         )
 
@@ -518,7 +519,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet34 resnet18 resnet50
+    chosen_model = 'new_fused' # 'convnextv2_tiny' resnet34 resnet18 resnet50 new_fused
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -539,7 +540,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type='resnet',
+        model_type='new_fused', # resnet
         model_name=chosen_model
     )
 
@@ -657,11 +658,16 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Train the model
     print(f"\nStarting training...")
-    print()
-    history = trainer.train(
-        num_epochs=config['epoch_max'],
-        early_stopping_patience=config.get('early_stopping_patience', 20)
-    )
+    if not config.get('pretrained_test', False):
+        history = trainer.train(
+            num_epochs=config['epoch_max'],
+            early_stopping_patience=config.get('early_stopping_patience', 20)
+        )
+    else:
+        history = trainer.train_pretrained(
+            num_epochs=config['epoch_max'],
+            early_stopping_patience=config.get('early_stopping_patience', 20)
+        )
     
     # Plot training curves
     plot_save_path = os.path.join(save_dir, 'training_curves.png')

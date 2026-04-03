@@ -210,14 +210,15 @@ def unfreeze_resnet_layer4(model: nn.Module):
         p.requires_grad = True
 
 
-def build_optimizer_stage1(model: nn.Module, head_lr=1e-3, weight_decay=1e-4):
+def build_optimizer_stage1(model: nn.Module, classifier: nn.Module=None, head_lr=1e-3, weight_decay=1e-4):
     """
     Stage 1: backbone frozen, train heads only.
     """
-    set_backbone_trainability(model, False)
+    set_backbone_trainability(model.encoder, False)
 
+    possible_head_modules = [model.encoder.mask_branch, model.encoder.fusion, model.projection_head] # model.classifier
     head_params = []
-    for m in [model.mask_branch, model.fusion, model.projector, model.classifier]:
+    for m in possible_head_modules: 
         head_params += list(m.parameters())
 
     optimizer = torch.optim.AdamW(
@@ -229,6 +230,7 @@ def build_optimizer_stage1(model: nn.Module, head_lr=1e-3, weight_decay=1e-4):
 def build_optimizer_stage2(
     model: nn.Module,
     backbone_type: str,          # "vit" or "resnet"
+    classifier: nn.Module=None,
     head_lr=1e-3,
     backbone_lr=1e-4,            # ~10x smaller than head LR
     weight_decay=1e-4,
@@ -240,19 +242,19 @@ def build_optimizer_stage2(
     - ResNet: layer4
     """
     if backbone_type == "vit":
-        unfreeze_last_vit_blocks(model, n_last_blocks=n_last_vit_blocks)
+        unfreeze_last_vit_blocks(model.encoder, n_last_blocks=n_last_vit_blocks)
     elif backbone_type == "resnet":
-        unfreeze_resnet_layer4(model)
+        unfreeze_resnet_layer4(model.encoder)
     else:
         raise ValueError("backbone_type must be 'vit' or 'resnet'")
 
     # Parameter groups
-    head_modules = [model.mask_branch, model.fusion, model.projector, model.classifier]
+    head_modules = [model.encoder.mask_branch, model.encoder.fusion, model.projection_head] # model.classifier
     head_params = []
     for m in head_modules:
         head_params += [p for p in m.parameters() if p.requires_grad]
 
-    backbone_params = [p for p in model.rgb_encoder.parameters() if p.requires_grad]
+    backbone_params = [p for p in model.encoder.rgb_encoder.parameters() if p.requires_grad]
 
     optimizer = torch.optim.AdamW(
         [
@@ -436,7 +438,7 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
         
         if not testing:
             # coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
-            coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed/{image_id}_cell_info.csv"
+            coords_crc_path = f"/taiga/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed/{image_id}_cell_info.csv"
         else:
             coords_crc_path = None
 

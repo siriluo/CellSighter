@@ -269,6 +269,8 @@ class HEFusedContrastiveModel(nn.Module):
                 "vit_base_patch14_dinov2.lvd142m",
                 pretrained=pretrained,
                 num_classes=0,  # return features
+                img_size=64,
+                dynamic_image_size=True,      
             )
             rgb_dim = self.rgb_encoder.num_features
 
@@ -306,12 +308,16 @@ class HEFusedContrastiveModel(nn.Module):
         # Optional classifier head for joint training/eval
         # self.classifier = nn.Linear(fusion_dim, 1)
 
-    def forward(self, rgb, center_mask, neighbor_mask, return_features=False):
+    def forward(self, x, return_features=False):
         """
         rgb:           [B, 3, H, W]
         center_mask:   [B, 1, H, W]
         neighbor_mask: [B, 1, H, W]
         """
+        rgb = x[:, :3]
+        neighbor_mask = x[:, 3:4]
+        center_mask = x[:, 4:5]
+        
         rgb_feat = self.rgb_encoder(rgb)                # [B, rgb_dim]
         mask_feat = self.mask_branch(center_mask, neighbor_mask)  # [B, mask_feat_dim]
         feat = self.fusion(torch.cat([rgb_feat, mask_feat], dim=1))  # [B, fusion_dim]
@@ -389,36 +395,32 @@ class ProjectionHeadSimp(nn.Module):
 class ProjectionHead(nn.Module):    
     def __init__(self,
         feature_dims=(2048, 128),
-        activation=nn.ReLU(),
+        hidden_dim=None,
+        activation='gelu',
         use_batch_norm=False,
         normalize_output=True,
+        dropout=0.1,
         **kwargs):
         super(ProjectionHead, self).__init__(**kwargs)
+        hidden_dim = hidden_dim or feature_dims[0]
+        self.normalize_output = normalize_output
 
-        self.fc1 = nn.Linear(feature_dims[0], feature_dims[0])
-        self.fc2 = nn.Linear(feature_dims[0], feature_dims[1])
-        self.activation = activation
-        self.batch_norm = use_batch_norm
-        self.dropout = nn.Dropout(p=0.1) if use_batch_norm else None
+        act = nn.GELU() if activation == 'gelu' else nn.ReLU(inplace=True)
 
-        if use_batch_norm:
-            self.bn1 = nn.BatchNorm1d(feature_dims[0])
-            # self.bn2 = nn.BatchNorm1d(feature_dims[1])
+        self.fc1 = nn.Linear(feature_dims[0], hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim) if use_batch_norm else nn.Identity()
+        self.act = act
+        self.drop = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.fc2 = nn.Linear(hidden_dim, feature_dims[1])
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         x = self.fc1(x)
-        if self.batch_norm:
-            x = self.bn1(x)
-        x = self.activation(x)
-        if self.dropout:
-            x = self.dropout(x)
+        x = self.bn1(x)
+        x = self.act(x)
+        x = self.drop(x)
         x = self.fc2(x)
-        # if self.batch_norm:
-        #     x = self.bn2(x)
-
-        # Just use l2 normalization at the end.
-        x = F.normalize(x, dim=1)
-
+        if self.normalize_output:
+            x = F.normalize(x, dim=1)
         return x
 
 class ClassificationHead2(nn.Module):
@@ -493,7 +495,7 @@ class ContrastiveModel(nn.Module):
             # mask_feat_dim: int = 128,
             # fusion_dim: int = 512,
             # **encoder_kwargs, 
-            self.encoder = HEFusedContrastiveModel(backbone='dinov2_vitb14', mask_feat_dim=128, fusion_dim=512) 
+            self.encoder = HEFusedContrastiveModel(backbone='resnet50', mask_feat_dim=128, fusion_dim=512) 
         else:
             raise ValueError(f'encoder model: {base_model} not recognized.')
         self.projection_head = ProjectionHead(**projection_head_kwargs)

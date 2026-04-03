@@ -353,12 +353,12 @@ class ContrastiveTrainer:
         
         for epoch in range(num_epochs):
             # for cifar test set
-            adjust_learning_rate(self.args, self.optimizer, epoch)
+            # adjust_learning_rate(self.args, self.optimizer, epoch)
 
             if epoch == 10:
                 optimizer = build_optimizer_stage2(
                     self.model,
-                    backbone_type="vit",      # "resnet" if using ResNet18/50
+                    backbone_type="resnet",      # "resnet" if using ResNet18/50, "vit" if using ViT
                     head_lr=5e-4,
                     backbone_lr=5e-5,         # 10x lower
                     weight_decay=1e-4,
