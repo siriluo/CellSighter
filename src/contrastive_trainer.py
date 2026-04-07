@@ -358,9 +358,9 @@ class ContrastiveTrainer:
             if epoch == 10:
                 optimizer = build_optimizer_stage2(
                     self.model,
-                    backbone_type="resnet",      # "resnet" if using ResNet18/50, "vit" if using ViT
-                    head_lr=5e-4,
-                    backbone_lr=5e-5,         # 10x lower
+                    backbone_type="vit",      # "resnet" if using ResNet18/50, "vit" if using ViT
+                    head_lr=2e-4,
+                    backbone_lr=1e-5,         # 10x lower
                     weight_decay=1e-4,
                     n_last_vit_blocks=2,      # try 1-3
                 )
@@ -369,6 +369,7 @@ class ContrastiveTrainer:
             epoch_start_time = time.time()
             
             # Training
+            self.model.train()
             train_loss = self.train_epoch(self.train_loader, self.model, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
             # Validation

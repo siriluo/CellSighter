@@ -31,7 +31,7 @@
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": true,
     "save_dir": "./con_classifier_test_checkpoints",
-    "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_supcon_newcrccodexdata_resnet18_test/checkpoint_epoch_100.pth",
+    "ckpt_path": "/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_supcon_resnet50_pretrainednew_50epoch_test1/best_model.pth",
     "classifier": true,
     "graph": false
 }

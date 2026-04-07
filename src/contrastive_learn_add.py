@@ -495,7 +495,8 @@ class ContrastiveModel(nn.Module):
             # mask_feat_dim: int = 128,
             # fusion_dim: int = 512,
             # **encoder_kwargs, 
-            self.encoder = HEFusedContrastiveModel(backbone='resnet50', mask_feat_dim=128, fusion_dim=512) 
+            # resnet50
+            self.encoder = HEFusedContrastiveModel(backbone='dinov2_vitb14', mask_feat_dim=128, fusion_dim=512) 
         else:
             raise ValueError(f'encoder model: {base_model} not recognized.')
         self.projection_head = ProjectionHead(**projection_head_kwargs)

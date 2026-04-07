@@ -21,7 +21,7 @@ sys.path.insert(0, str(src_dir))
 
 # Local imports
 from models import create_model, get_model_info
-from contrastive_learn_add import ContrastiveModel, ProjectionHead, ClassificationHead
+from contrastive_learn_add import ClassificationHead2, ContrastiveModel, ProjectionHead, ClassificationHead
 from gat_model import GATv2ClassificationHead
 from contrastive_trainer import ContrastiveTrainer
 from contrastive_classifier_trainer import ConClassTrainer
@@ -547,7 +547,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     if args.classifier:
         use_graph = config.get('graph', False)
         if not use_graph:
-            classifier = ClassificationHead(**classification_head_kwargs)
+            # classifier = ClassificationHead(**classification_head_kwargs)
+            classifier = ClassificationHead2(in_dim=model_dict[chosen_model], n_classes=config['num_classes'])
         else:
             classifier = GATv2ClassificationHead(**classification_head_kwargs)
         # state_dict = torch.load('/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_mask_test_aug/best_model.pth')

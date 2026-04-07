@@ -102,7 +102,7 @@ Examples:
     else:
         args.warm = True
     if args.warm:
-        args.warmup_from = 0.01
+        args.warmup_from = config['lr'] / 100
         args.warm_epochs = 10
         if args.cosine:
             eta_min_en = config['lr'] * (args.lr_decay_rate ** 3)
