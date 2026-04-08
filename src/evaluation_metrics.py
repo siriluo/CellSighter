@@ -279,6 +279,7 @@ class ConClassEvaluator:
         all_preds = []
         all_labels = []
         all_orig_labels = []
+        all_simpler_labels = []
         all_probs = []
         
         list_of_logits = []
@@ -335,10 +336,11 @@ class ConClassEvaluator:
                     if self.config.get("simpler_labels", False):
                         orig_preds = probs.argmax(1)
                         preds = orig_preds.cpu().numpy()
-                        # preds = [convert_to_simpler_labels(p) for p in preds]
-                        orig_labels = labels.cpu().numpy()
-                        labels = [convert_to_simpler_labels(l) for l in orig_labels]
-                        all_orig_labels.extend(orig_labels)
+                        preds = [convert_to_simpler_labels(p) for p in preds]
+                        labels = labels.cpu().numpy()
+                        simpler_labels = [convert_to_simpler_labels(l) for l in labels]
+                        # all_orig_labels.extend(orig_labels)
+                        all_simpler_labels.extend(simpler_labels)
                     else:
                         preds = probs.argmax(1)
                         preds = preds.cpu().numpy()
@@ -369,9 +371,6 @@ class ConClassEvaluator:
         
 
         # Calculate metrics
-        avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
-        accuracy = accuracy_score(all_labels, all_preds)
-
         list_of_logits = torch.tensor(list_of_logits).squeeze(1)
         list_of_labels = torch.tensor(list_of_labels).squeeze(1)
         topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
@@ -379,6 +378,13 @@ class ConClassEvaluator:
         save_path = self.config.get('save_dir', './test_checkpoints')
         with open(f"{save_path}/topk_accs.json", 'w') as f:
             json.dump(topk_accs, f, indent=4)
+        
+        if self.config.get("simpler_labels", False):
+            all_orig_labels = all_labels.copy()
+            all_labels = all_simpler_labels
+        
+        avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
+        accuracy = accuracy_score(all_labels, all_preds)
 
         if self.num_classes <= 2:
             average_method = 'binary'
@@ -413,8 +419,8 @@ class ConClassEvaluator:
                 auc = roc_auc_score(all_labels, all_probs)
             else:
                 # Fix the multi aucs
-                # if self.config.get("simpler_labels", False):
-                #     all_labels = all_orig_labels
+                if self.config.get("simpler_labels", False):
+                    all_labels = all_orig_labels
                     
                 all_probs = np.vstack(all_probs)
                 

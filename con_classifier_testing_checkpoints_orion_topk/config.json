@@ -1,7 +1,7 @@
 {
   "crop_input_size": 64,
   "crop_size": 64,
-  "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000/CRC30",
+  "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000",
   "xenium_fold": "fold5",
   "orion": true,
   "train_set": [],
@@ -137,7 +137,7 @@
   "lr": 0.01,
   "proj_lr": 0.01,
   "batch_size": 1,
-  "num_workers": 12,
+  "num_workers": 24,
   "weight_to_eval": "",
   "sample_batch": false,
   "to_pad": false,
@@ -151,5 +151,5 @@
   "class_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_classifier_checkpoints_orion/best_model.pth",
   "classifier": true,
   "graph": false,
-  "simpler_labels": false
+  "simpler_labels": true
 }

@@ -1,5 +1,5 @@
 {
-    "crop_input_size": 64,
+    "crop_input_size": 98,
     "crop_size": 128,
     "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/crc_codex_better_masks",
     "orion": false,

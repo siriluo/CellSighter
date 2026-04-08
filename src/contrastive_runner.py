@@ -573,7 +573,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
-            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+            criterion = nn.CrossEntropyLoss() # weight=class_weights
         else:
             criterion = nn.CrossEntropyLoss()
     

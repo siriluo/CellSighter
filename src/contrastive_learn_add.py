@@ -269,8 +269,8 @@ class HEFusedContrastiveModel(nn.Module):
                 "vit_base_patch14_dinov2.lvd142m",
                 pretrained=pretrained,
                 num_classes=0,  # return features
-                img_size=64,
-                dynamic_image_size=True,      
+                img_size=98,
+                dynamic_img_size=True,      
             )
             rgb_dim = self.rgb_encoder.num_features
 

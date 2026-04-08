@@ -303,6 +303,8 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = config["root_dir"]
+    
+    crc_samples = ["CRC22", "CRC23", "CRC26", "CRC28", "CRC29", "CRC30"] # , "CRC04"
 
     # The data is numbered 00000
     mask_name = "cell_masks"
@@ -310,11 +312,12 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     labels_name = "meta"
 
     # count
-    filelist = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
-
     print("Loading testing data...")
-    test_crops = load_cell_crops_from_orion(cell_patches_path, mask_name, img_patch_name, labels_name, filelist)
-    # test_crops = load_samples(config, image_names, testing=True)
+    test_crops = []
+    for sample in crc_samples:
+        filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
+        crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
+        test_crops.extend(crops)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
@@ -324,11 +327,13 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     test_dataset = CellCropsDataset(
         crops=test_crops,
         transform=test_transform,
-        mask=use_mask
+        mask=use_mask,
+        contrastive=False,
     )
     
     # Create data loaders
     use_graph = config.get('graph', False)
+
 
     test_loader = DataLoader(
         test_dataset,
