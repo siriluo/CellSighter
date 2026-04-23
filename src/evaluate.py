@@ -45,6 +45,7 @@ model_dict = {
     'resnet50': 2048,
     'resnet101': 2048,
     'convnextv2_tiny': 768,
+    'new_fused': 512,
 }
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
@@ -197,7 +198,7 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     use_xenium = config.get("xenium", False)
     
     if use_xenium:
-        folds = [config.get("xenium_fold", None)]
+        folds = config.get("xenium_fold", None)
         
         if folds[0] is not None:
             root_dir = config["root_dir"]
@@ -303,6 +304,20 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = config["root_dir"]
+    
+    # set random seed for reproducibility
+    np.random.seed(42)
+    
+    # First get the list of folders and shuffle them to ensure random distribution of samples across folds
+    # /taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000
+    folders = glob.glob("CRC*", root_dir=cell_patches_path)
+    perm_indices = np.random.permutation(len(folders))
+    
+    folders_perm = np.array(folders)
+    folders_perm = folders_perm[perm_indices]
+    
+    # Then split into folds based on this.
+    test_crc_samples = folders_perm[32:len(folders)]
 
     # The data is numbered 00000
     mask_name = "cell_masks"
@@ -310,11 +325,12 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     labels_name = "meta"
 
     # count
-    filelist = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
-
     print("Loading testing data...")
-    test_crops = load_cell_crops_from_orion(cell_patches_path, mask_name, img_patch_name, labels_name, filelist)
-    # test_crops = load_samples(config, image_names, testing=True)
+    test_crops = []
+    for sample in test_crc_samples:
+        filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
+        crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
+        test_crops.extend(crops)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
@@ -324,11 +340,13 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     test_dataset = CellCropsDataset(
         crops=test_crops,
         transform=test_transform,
-        mask=use_mask
+        mask=use_mask,
+        contrastive=False,
     )
     
     # Create data loaders
     use_graph = config.get('graph', False)
+
 
     test_loader = DataLoader(
         test_dataset,
@@ -387,7 +405,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet18 resnet50 resnet34
+    chosen_model = 'new_fused' # 'convnextv2_tiny' resnet18 resnet50 resnet34
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -408,7 +426,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type='resnet',
+        model_type='new_fused', # new_fused resnet
         model_name=chosen_model
     )
 

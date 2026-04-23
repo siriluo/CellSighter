@@ -104,12 +104,12 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         )
         print("Adam")
         
-    if config.get('pretrained_test', False):
-        optimizer = build_optimizer_stage1(
-            model,
-            head_lr=config['proj_lr'],
-            weight_decay=1e-4,
-        )
+    # if config.get('pretrained_test', False):
+    #     optimizer = build_optimizer_stage1(
+    #         model,
+    #         head_lr=config['proj_lr'],
+    #         weight_decay=1e-4,
+    #     )
 
     # # Learning rate scheduler
     # scheduler = optim.lr_scheduler.StepLR(
@@ -385,9 +385,41 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = config["root_dir"]
     
-    crc_samples = ["CRC01", "CRC02", "CRC04", "CRC05", "CRC06", "CRC09", "CRC10", "CRC11", "CRC12", "CRC13", 
-                   "CRC14", "CRC15", "CRC16", "CRC17", "CRC18", "CRC19", "CRC20"] # , "CRC04"
-    val_crc_sample = "CRC07"
+    # set random seed for reproducibility
+    np.random.seed(42)
+    
+    # First get the list of folders and shuffle them to ensure random distribution of samples across folds
+    # /taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000
+    folders = glob.glob("CRC*", root_dir=cell_patches_path)
+    perm_indices = np.random.permutation(len(folders))
+    
+    folders_perm = np.array(folders)
+    folders_perm = folders_perm[perm_indices]
+    
+    # Then split into folds based on this.
+    test_crc_samples = folders_perm[32:len(folders)]
+    print(test_crc_samples)
+    print("fold 3")
+    train_val_samples = folders_perm[:32]
+    
+    folds = 4
+    splits = np.split(train_val_samples, folds)
+    
+    val_fold = 1 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+    crc_samples = []
+    for i in range(folds):
+        if i != val_fold:
+            crc_samples.append(splits[i])
+    crc_samples = np.concatenate(crc_samples)
+    
+    val_crc_samples = splits[val_fold]
+    
+    
+    # print(folders)
+    
+    # crc_samples = ["CRC01", "CRC02", "CRC04", "CRC05", "CRC06", "CRC09", "CRC10", "CRC11", "CRC12", "CRC13", 
+    #                "CRC14", "CRC15", "CRC16", "CRC17", "CRC18", "CRC19", "CRC20"] # , "CRC04"
+    # val_crc_sample = "CRC07"
 
     # The data is numbered 00000
     mask_name = "cell_masks"
@@ -403,10 +435,14 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
         training_crops.extend(crops)
 
     # maybe use the last 10 files for validation and the rest for training?
-    validation_filelist = glob.glob(f"{cell_patches_path}/{val_crc_sample}/{labels_name}_*.csv")
+    # validation_filelist = glob.glob(f"{cell_patches_path}/{val_crc_sample}/{labels_name}_*.csv")
     
     test_crops = []
-    test_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{val_crc_sample}", mask_name, img_patch_name, labels_name, validation_filelist)
+    for sample in val_crc_samples:
+        validation_filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
+        val_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, validation_filelist)
+        test_crops.extend(val_crops)
+    # test_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{val_crc_sample}", mask_name, img_patch_name, labels_name, validation_filelist)
     # test_crops = load_samples(config, image_names, testing=True)
     print(f"Loaded {len(test_crops)} testing samples")
 
@@ -524,18 +560,24 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
+    if chosen_model == 'new_fused':
+        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14
+        encoder_kwargs['freeze_backbone'] = False # True False
+        
     projection_head_kwargs = {
         'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
         'use_batch_norm': True, # True False
         'normalize_output': True
     }
+    
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
         'dropout_rate': 0.2,
         'name': chosen_model, # resnet50 resnet18
     }
+    
     model = create_contrastive_model(
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
@@ -547,8 +589,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     if args.classifier:
         use_graph = config.get('graph', False)
         if not use_graph:
-            # classifier = ClassificationHead(**classification_head_kwargs)
-            classifier = ClassificationHead2(in_dim=model_dict[chosen_model], n_classes=config['num_classes'])
+            classifier = ClassificationHead(**classification_head_kwargs)
+            # classifier = ClassificationHead2(in_dim=model_dict[chosen_model], n_classes=config['num_classes'])
         else:
             classifier = GATv2ClassificationHead(**classification_head_kwargs)
         # state_dict = torch.load('/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_mask_test_aug/best_model.pth')
@@ -573,7 +615,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
-            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+            criterion = nn.CrossEntropyLoss() # weight=class_weights
         else:
             criterion = nn.CrossEntropyLoss()
     

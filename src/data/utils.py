@@ -18,6 +18,8 @@ from typing import List, Tuple, Dict, Any, Optional, Callable
 from torchvision.transforms import Lambda
 import cv2
 import pandas as pd
+from sklearn.preprocessing import label_binarize
+from sklearn.metrics import average_precision_score, precision_recall_curve, auc
 
 
 class CellCrop:
@@ -136,10 +138,29 @@ class ShiftAugmentation:
         return x
 
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD  = (0.229, 0.224, 0.225)
+
+def normalize_rgb_only(x: torch.Tensor) -> torch.Tensor:
+    """
+    x: [C,H,W], with channels like [R,G,B,(optional extra channels...)]
+    Normalizes only first 3 channels.
+    """
+    if x.size(0) < 3:
+        return x
+    mean = x.new_tensor(IMAGENET_MEAN).view(3, 1, 1)
+    std = x.new_tensor(IMAGENET_STD).view(3, 1, 1)
+    x_rgb = (x[:3] - mean) / std
+    if x.size(0) == 3:
+        return x_rgb
+    return torch.cat([x_rgb, x[3:]], dim=0)
+
+
 def create_validation_transform(crop_size: int) -> Callable:
     """Create transformation pipeline for validation data."""
     return torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
+        torchvision.transforms.Lambda(normalize_rgb_only),
         torchvision.transforms.CenterCrop((crop_size, crop_size))
     ])
 
@@ -154,9 +175,10 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
             torchvision.transforms.Lambda(augmentor.augment_cell_shape),
             torchvision.transforms.Lambda(augmentor.augment_environment_shape),
             torchvision.transforms.ToTensor(),
+            torchvision.transforms.Lambda(normalize_rgb_only),
             torchvision.transforms.RandomRotation(degrees=(0, 360)),
-            Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
-                if np.random.random() < 0.5 else x),
+            # Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
+            #     if np.random.random() < 0.5 else x),
             torchvision.transforms.CenterCrop((crop_size, crop_size)),
             torchvision.transforms.RandomHorizontalFlip(p=0.75),
             torchvision.transforms.RandomVerticalFlip(p=0.75),
@@ -165,8 +187,8 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
         return torchvision.transforms.Compose([
             torchvision.transforms.ToTensor(),
             torchvision.transforms.RandomRotation(degrees=(0, 360)),
-            Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
-                if np.random.random() < 0.5 else x),
+            # Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
+            #     if np.random.random() < 0.5 else x),
             torchvision.transforms.CenterCrop((crop_size, crop_size)),
             torchvision.transforms.RandomHorizontalFlip(p=0.75),
             torchvision.transforms.RandomVerticalFlip(p=0.75),
@@ -290,22 +312,135 @@ def topk_accuracy(logits: torch.Tensor, targets: torch.Tensor, ks=(1, 3, 5)):
 
 def convert_to_simpler_labels(label): 
     
+    # new_mapping = {
+    #     0: 0,
+    #     1: 0,
+    #     2: 0,
+    #     3: 0,
+    #     4: 0,
+    #     5: 1,
+    #     6: 1,
+    #     7: 2,
+    #     8: 1,
+    #     9: 0,
+    # }
+    # new_mapping = {
+    #     0: 1,
+    #     1: 1,
+    #     2: 1,
+    #     3: 2,
+    #     4: 3,
+    #     5: 4,
+    #     6: 4,
+    #     7: 0,
+    #     8: 5,
+    #     9: 3,
+    # }
     new_mapping = {
-        0: 0,
-        1: 0,
-        2: 0,
-        3: 0,
-        4: 0,
-        5: 1,
-        6: 1,
-        7: 2,
-        8: 1,
-        9: 0,
+        0: 1,
+        1: 1,
+        2: 1,
+        3: 2,
+        4: 3,
+        5: 4,
+        6: 4,
+        7: 0,
+        8: 4,
+        9: 3,
     }
+    
     
     simpler_label = new_mapping.get(label, label)  # Default to original label if not in mapping
     
     return simpler_label
+
+
+def pr_auc_score(
+    y_true,
+    y_score,
+    *,
+    labels=None,
+    average="macro",   # None, "macro", "weighted", "micro"
+    method="ap",       # "ap" (Average Precision) or "trapezoid"
+    return_per_class=False,
+):
+    """
+    Precision-Recall AUC for binary/multiclass one-vs-rest.
+
+    Parameters
+    ----------
+    y_true : array-like, shape (n_samples,)
+        True class labels.
+    y_score : array-like, shape (n_samples, n_classes)
+        Predicted scores/probabilities for each class.
+    labels : array-like, optional
+        Class order matching columns of y_score.
+    average : {None, "macro", "weighted", "micro"}, default="macro"
+    method : {"ap", "trapezoid"}, default="ap"
+        "ap" uses average_precision_score (recommended by sklearn for PR).
+        "trapezoid" uses auc(recall, precision).
+    return_per_class : bool, default=False
+        If True, returns (overall, {label: score}).
+
+    Returns
+    -------
+    score : float or np.ndarray
+    """
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+
+    if y_score.ndim == 1:
+        y_score = y_score.reshape(-1, 1)
+
+    if labels is None:
+        labels = np.unique(y_true)
+    labels = np.asarray(labels)
+
+    if y_score.shape[1] != len(labels):
+        raise ValueError(
+            f"y_score has {y_score.shape[1]} columns but labels has {len(labels)} classes."
+        )
+
+    y_true_bin = label_binarize(y_true, classes=labels)
+    # label_binarize returns (n_samples, 1) for binary; make it 2-column OVR
+    if y_true_bin.shape[1] == 1 and len(labels) == 2:
+        y_true_bin = np.hstack([1 - y_true_bin, y_true_bin])
+
+    per_class = []
+    for i in range(len(labels)):
+        yt = y_true_bin[:, i]
+        ys = y_score[:, i]
+
+        if method == "ap":
+            s = average_precision_score(yt, ys)
+        elif method == "trapezoid":
+            p, r, _ = precision_recall_curve(yt, ys)
+            s = auc(r, p)
+        else:
+            raise ValueError("method must be 'ap' or 'trapezoid'")
+        per_class.append(s)
+
+    per_class = np.asarray(per_class, dtype=float)
+
+    if average is None:
+        overall = per_class
+    elif average == "macro":
+        overall = np.nanmean(per_class)
+    elif average == "weighted":
+        supports = y_true_bin.sum(axis=0)
+        overall = np.average(per_class, weights=supports)
+    elif average == "micro":
+        if method == "ap":
+            overall = average_precision_score(y_true_bin.ravel(), y_score.ravel())
+        else:
+            p, r, _ = precision_recall_curve(y_true_bin.ravel(), y_score.ravel())
+            overall = auc(r, p)
+    else:
+        raise ValueError("average must be None, 'macro', 'weighted', or 'micro'")
+
+    if return_per_class:
+        return overall, dict(zip(labels.tolist(), per_class.tolist()))
+    return overall
 
 
 def load_data(fname: str) -> np.ndarray:

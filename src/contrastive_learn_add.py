@@ -22,7 +22,7 @@ import timm
 from typing import Dict, Any, Optional, Union
 from models import create_model
 from gat_model import GraphAttentionLayer
-from convnext_model import convnextv2_tiny
+# from convnext_model import convnextv2_tiny
 
 
 class BasicBlock(nn.Module):
@@ -162,7 +162,8 @@ model_dict = {
     'resnet34': [resnet34, 512],
     'resnet50': [resnet50, 2048],
     'resnet101': [resnet101, 2048],
-    'convnextv2_tiny': [convnextv2_tiny, 768],
+    # 'convnextv2_tiny': [convnextv2_tiny, 768],
+    'new_fused': ["yolo", 512]
 }
 
 
@@ -224,6 +225,9 @@ class SupConViT(nn.Module):
         return feat
   
   
+
+  
+  
 class MaskBranch(nn.Module):
     # Encodes 2 masks: center-cell + neighbor-cell
     def __init__(self, in_ch: int = 2, out_dim: int = 128):
@@ -269,8 +273,8 @@ class HEFusedContrastiveModel(nn.Module):
                 "vit_base_patch14_dinov2.lvd142m",
                 pretrained=pretrained,
                 num_classes=0,  # return features
-                img_size=64,
-                dynamic_image_size=True,      
+                img_size=98,
+                dynamic_img_size=True,      
             )
             rgb_dim = self.rgb_encoder.num_features
 
@@ -487,16 +491,18 @@ class ContrastiveModel(nn.Module):
                 self.encoder = SupConResNet(name=model_name, **encoder_kwargs) # resnet18 currently used resnet50, try out resnet18 next
             else:
                 self.encoder = PretrainedSupConResNet(name=model_name, **encoder_kwargs)
-        elif base_model == 'convnext':
-            self.encoder = convnextv2_tiny(**encoder_kwargs) # the output features should have size (B, 768, 7, 7), so, just 768?
+        # elif base_model == 'convnext':
+        #     self.encoder = convnextv2_tiny(**encoder_kwargs) # the output features should have size (B, 768, 7, 7), so, just 768?
         elif base_model == 'new_fused':
             # pretrained: bool = True,
             # freeze_backbone: bool = False,
             # mask_feat_dim: int = 128,
             # fusion_dim: int = 512,
             # **encoder_kwargs, 
-            # resnet50
-            self.encoder = HEFusedContrastiveModel(backbone='dinov2_vitb14', mask_feat_dim=128, fusion_dim=512) 
+            # resnet50, dinov2_vitb14 
+            freeze = encoder_kwargs.get('freeze_backbone', False)
+            backbone = encoder_kwargs.get('backbone', 'resnet50')
+            self.encoder = HEFusedContrastiveModel(backbone=backbone, mask_feat_dim=128, fusion_dim=512, freeze_backbone=freeze) 
         else:
             raise ValueError(f'encoder model: {base_model} not recognized.')
         self.projection_head = ProjectionHead(**projection_head_kwargs)

@@ -200,6 +200,7 @@ class ContrastiveTrainer:
     def train_epoch(self, train_loader, model, criterion, optimizer, epoch): # , opt
         """one epoch training"""
         # model.train()
+        
 
         batch_time = AverageMeter()
         data_time = AverageMeter()
@@ -353,27 +354,41 @@ class ContrastiveTrainer:
         
         for epoch in range(num_epochs):
             # for cifar test set
-            # adjust_learning_rate(self.args, self.optimizer, epoch)
+            adjust_learning_rate(self.args, self.optimizer, epoch)
 
-            if epoch == 10:
-                optimizer = build_optimizer_stage2(
-                    self.model,
-                    backbone_type="vit",      # "resnet" if using ResNet18/50, "vit" if using ViT
-                    head_lr=2e-4,
-                    backbone_lr=1e-5,         # 10x lower
-                    weight_decay=1e-4,
-                    n_last_vit_blocks=2,      # try 1-3
-                )
-                self.optimizer = optimizer
+            # if epoch == 10:
+            #     optimizer = build_optimizer_stage2(
+            #         self.model,
+            #         backbone_type="vit",      # "resnet" if using ResNet18/50, "vit" if using ViT
+            #         head_lr=2e-4,
+            #         backbone_lr=1e-5,         # 10x lower
+            #         weight_decay=1e-4,
+            #         n_last_vit_blocks=2,      # try 1-3
+            #     )
+            #     self.optimizer = optimizer
+            #     if self.scheduler is not None:
+            #         remaining_epochs = max(1, num_epochs - epoch)
+            #         eta_min = getattr(self.scheduler, "eta_min", 1e-6)
+            #         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            #             self.optimizer,
+            #             T_max=remaining_epochs,
+            #             eta_min=eta_min
+            #         )
 
             epoch_start_time = time.time()
             
             # Training
-            self.model.train()
+            # self.model.train()
             train_loss = self.train_epoch(self.train_loader, self.model, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
             # Validation
             val_metrics = self.validate()
+
+            # Update learning rate schedule
+            if self.scheduler:
+                self.scheduler.step()
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.history['learning_rates'].append(current_lr)
             
             # Record history
             self.history['train_loss'].append(train_loss)
@@ -441,7 +456,7 @@ class ContrastiveTrainer:
             epoch_start_time = time.time()
             
             # Training
-            self.model.train()
+            # self.model.train()
             train_loss = self.train_epoch(self.train_loader, self.model, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
             # Validation

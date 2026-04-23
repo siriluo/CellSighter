@@ -24,14 +24,14 @@
     "lr": 1e-4,
     "proj_lr": 1e-4,
     "batch_size": 512,
-    "num_workers": 24,
+    "num_workers": 32,
     "weight_to_eval": "",
     "sample_batch": false,
     "to_pad": false,
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": true,
     "save_dir": "./contrastive_classifier_checkpoints_orion",
-    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_supcon_orion_test4_resnet50_maskaug_halfset/best_model.pth",
+    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_checkpoints_orion/best_model.pth",
     "classifier": true,
     "graph": false
 }

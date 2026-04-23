@@ -24,7 +24,7 @@
     "lr": 5e-4,
     "proj_lr": 5e-4,
     "batch_size": 2048,
-    "num_workers": 24,
+    "num_workers": 32,
     "weight_to_eval": "",
     "sample_batch": false,
     "to_pad": false,
@@ -33,5 +33,6 @@
     "save_dir": "./contrastive_checkpoints_orion",
     "ckpt_path": "",
     "classifier": false,
-    "graph": false
+    "graph": false,
+    "pretrained_test": true
 }

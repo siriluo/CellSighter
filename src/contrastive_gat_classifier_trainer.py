@@ -30,7 +30,7 @@ from data.data import CellCropsDataset
 from data.graph_data import *
 from train import create_data_loaders, load_config, calculate_class_weights, create_optimizer_and_scheduler
 from contrastive_learn_add import ContrastiveModel
-from gat_results_debug import comprehensive_debug
+# from gat_results_debug import comprehensive_debug
 
 import json
 
@@ -502,11 +502,6 @@ class ConClassGraphTrainer:
         self.save_history()
         
         return self.history
-    
-
-    def debug_gat(self):
-        comprehensive_debug(self.classifier, self.graph_train_loader, self.graph_val_loader, self.criterion, self.device)
-
 
 
     def evaluate_detailed(self, test_loader: Optional[DataLoader] = None) -> Dict[str, Any]:

@@ -22,10 +22,7 @@ from matplotlib import pyplot as plt
 
 
 # Local imports
-from models import create_model, get_model_info
-from trainer import Trainer
-from data.utils import load_samples, create_training_transform, create_validation_transform
-from data.data import CellCropsDataset
+from data.utils import load_samples, create_training_transform, create_validation_transform, pr_auc_score
 from train import create_data_loaders, load_config, calculate_class_weights, create_optimizer_and_scheduler
 from contrastive_learn_add import ContrastiveModel
 import json
@@ -621,6 +618,9 @@ class ConClassTrainer:
                 
                 auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
                 multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
+                
+                pr_auc = pr_auc_score(all_labels, all_probs, average='weighted')
+                multi_pr_aucs = pr_auc_score(all_labels, all_probs, average=None)
         except ValueError:
             auc = 0.0  # Handle case where only one class is present
             if self.num_classes > 2:
@@ -649,6 +649,7 @@ class ConClassTrainer:
             'recall_avg': recall_avg,
             'f1_avg': f1_avg,
             'auc': auc,
+            'pr_auc': pr_auc,
             'confusion_matrix': cm.tolist(),
             'class_names': [f'Non-{bin_ct_name}', f'{bin_ct_name}'],
             'loss': avg_loss
@@ -657,6 +658,7 @@ class ConClassTrainer:
         if self.num_classes > 2:
             multi_aucs_list = multi_aucs.tolist()
             results.update({'multi_class_aucs': multi_aucs_list})
+            results.update({'multi_class_pr_aucs': multi_pr_aucs.tolist()})
         
         return results
     

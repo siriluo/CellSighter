@@ -63,6 +63,8 @@ logs/
 *.o*
 *.e*
 *.sbatch
+src/data/test_graphs/
+src/data/test_outputs/
 src/data/cifar_10/cifar-10-python.tar.gz
 src/data/cifar_10/cifar-10-batches-py/batches.meta
 src/data/cifar_10/cifar-10-batches-py/data_batch_1
@@ -170,3 +172,5 @@ ct_class_training_job_nonbin_con_classifier_deltaai.sbatch
 ct_class_training_job_nonbin_contrastive_deltaai.sbatch
 ct_class_training_job.sbatch
 ct_class_training_job.sbatch
+results_orion_top_results_test1/topk_accs.json
+results_orion_topk_results_test2/topk_accs.json

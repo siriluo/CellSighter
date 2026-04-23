@@ -21,7 +21,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 from matplotlib import pyplot as plt
 from PIL import Image
 from torch_geometric.loader import HGTLoader, NeighborLoader
-from data.utils import convert_to_simpler_labels, topk_accuracy
+from data.utils import convert_to_simpler_labels, topk_accuracy, pr_auc_score
 
 
 # Local imports
@@ -279,6 +279,7 @@ class ConClassEvaluator:
         all_preds = []
         all_labels = []
         all_orig_labels = []
+        all_simpler_labels = []
         all_probs = []
         
         list_of_logits = []
@@ -335,10 +336,11 @@ class ConClassEvaluator:
                     if self.config.get("simpler_labels", False):
                         orig_preds = probs.argmax(1)
                         preds = orig_preds.cpu().numpy()
-                        # preds = [convert_to_simpler_labels(p) for p in preds]
-                        orig_labels = labels.cpu().numpy()
-                        labels = [convert_to_simpler_labels(l) for l in orig_labels]
-                        all_orig_labels.extend(orig_labels)
+                        preds = [convert_to_simpler_labels(p) for p in preds]
+                        labels = labels.cpu().numpy()
+                        simpler_labels = [convert_to_simpler_labels(l) for l in labels]
+                        # all_orig_labels.extend(orig_labels)
+                        all_simpler_labels.extend(simpler_labels)
                     else:
                         preds = probs.argmax(1)
                         preds = preds.cpu().numpy()
@@ -369,9 +371,6 @@ class ConClassEvaluator:
         
 
         # Calculate metrics
-        avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
-        accuracy = accuracy_score(all_labels, all_preds)
-
         list_of_logits = torch.tensor(list_of_logits).squeeze(1)
         list_of_labels = torch.tensor(list_of_labels).squeeze(1)
         topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
@@ -379,6 +378,19 @@ class ConClassEvaluator:
         save_path = self.config.get('save_dir', './test_checkpoints')
         with open(f"{save_path}/topk_accs.json", 'w') as f:
             json.dump(topk_accs, f, indent=4)
+            
+        list_logits_np = list_of_logits.numpy()
+        np.savez(f"{save_path}/list_of_logits.npz", list_logits_np)
+            
+        list_labels_np = list_of_labels.numpy()
+        np.savez(f"{save_path}/list_of_labels.npz", list_labels_np)
+        
+        if self.config.get("simpler_labels", False):
+            all_orig_labels = all_labels.copy()
+            all_labels = all_simpler_labels
+        
+        avg_loss = losses.avg # running_loss / len(self.graph_val_loader)
+        accuracy = accuracy_score(all_labels, all_preds)
 
         if self.num_classes <= 2:
             average_method = 'binary'
@@ -413,13 +425,16 @@ class ConClassEvaluator:
                 auc = roc_auc_score(all_labels, all_probs)
             else:
                 # Fix the multi aucs
-                # if self.config.get("simpler_labels", False):
-                #     all_labels = all_orig_labels
+                if self.config.get("simpler_labels", False):
+                    all_labels = all_orig_labels
                     
                 all_probs = np.vstack(all_probs)
                 
                 auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
                 multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
+                
+                pr_auc = pr_auc_score(all_labels, all_probs, average='weighted')
+                multi_pr_aucs = pr_auc_score(all_labels, all_probs, average=None)
         except ValueError:
             auc = 0.0  # Handle case where only one class is present
             if self.num_classes > 2:
@@ -448,6 +463,7 @@ class ConClassEvaluator:
             'recall_avg': recall_avg,
             'f1_avg': f1_avg,
             'auc': auc,
+            'pr_auc': pr_auc,
             'confusion_matrix': cm.tolist(),
             'class_names': [f'Non-{bin_ct_name}', f'{bin_ct_name}'],
             'loss': avg_loss
@@ -456,10 +472,12 @@ class ConClassEvaluator:
         if self.num_classes > 2:
             if isinstance(multi_aucs, list):
                 multi_aucs_list = multi_aucs
+                multi_pr_aucs_list = multi_pr_aucs
             else:
                 multi_aucs_list = multi_aucs.tolist()
-            results.update({'multi_class_aucs': multi_aucs_list})
-        
+                multi_pr_aucs_list = multi_pr_aucs.tolist()
+            results.update({'multi_class_aucs': multi_aucs_list, 'multi_class_pr_aucs': multi_pr_aucs_list})
+            
         return results
 
 

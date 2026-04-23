@@ -33,5 +33,6 @@
     "save_dir": "./contrastive_checkpoints",
     "ckpt_path": "",
     "classifier": false,
-    "graph": false
+    "graph": false,
+    "pretrained_test": true
 }
