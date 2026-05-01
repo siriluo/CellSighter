@@ -47,7 +47,8 @@ class ContrastiveTrainer:
                  device: str = 'cuda',
                  save_dir: str = './contrastive_checkpoints',
                  log_interval: int = 10,
-                 args=None):
+                 args=None,
+                 config=None):
         """
         Initialize the trainer.
         
@@ -73,6 +74,7 @@ class ContrastiveTrainer:
         self.save_dir = save_dir
         self.log_interval = log_interval
         self.args = args
+        self.config = config
         
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)
@@ -241,6 +243,7 @@ class ContrastiveTrainer:
 
             # compute loss
             # unnormalized_features, features, projection, logits
+            
             unnormalized_features, features, projection = model(images_new) # , logits 
             f1, f2 = torch.split(projection, [bsz, bsz], dim=0)
             # print(f1.shape, f2.shape)
