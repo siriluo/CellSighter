@@ -369,8 +369,10 @@ class ConClassEvaluator:
         
         # For the mapping, tumor cells are class 7 (index 7).
         
-
         # Calculate metrics
+        if self.config['batch_size'] > 1:
+            list_of_logits = [item for sublist in list_of_logits for item in sublist]
+            list_of_labels = [item for sublist in list_of_labels for item in sublist]
         list_of_logits = torch.tensor(list_of_logits).squeeze(1)
         list_of_labels = torch.tensor(list_of_labels).squeeze(1)
         topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])

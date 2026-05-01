@@ -32,9 +32,9 @@
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": false,
     "save_dir": "./con_classifier_testing_checkpoints_orion_topk",
-    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_supcon_orion_fold1_resnet50_wonky_test1/best_model.pth",
-    "class_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_orion_fold1_resnet50_wonky_test1/best_model.pth",
+    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_supcon_orion_fold2_resnet50_wonky_test1/best_model.pth",
+    "class_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_orion_fold2_resnet50_wonky_test1/best_model.pth",
     "classifier": true,
     "graph": false,
-    "simpler_labels": true
+    "simpler_labels": false
 }

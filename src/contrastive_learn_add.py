@@ -24,6 +24,12 @@ from models import create_model
 from gat_model import GraphAttentionLayer
 # from convnext_model import convnextv2_tiny
 
+try:
+    import uni
+    from uni import get_encoder as uni_get_encoder
+except Exception:
+    uni_get_encoder = None
+
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -260,12 +266,22 @@ class HEFusedContrastiveModel(nn.Module):
         freeze_backbone: bool = False,
         mask_feat_dim: int = 128,
         fusion_dim: int = 512,
+        device: str = "cuda",
         # proj_dim: int = 128,
     ):
         super().__init__()
 
         # 1) RGB image encoder
-        if backbone == "dinov2_vitb14":
+        self.backbone_name = backbone
+        self.uni_transform = None  # expose for dataloader use
+
+        if backbone == "uni2h":
+            if uni_get_encoder is None:
+                raise ImportError("UNI package not installed. Install and import `uni`.")
+            self.rgb_encoder, self.uni_transform = uni_get_encoder(enc_name="uni2-h", device=device)
+            rgb_dim = 1536  # UNI-2h embedding dim
+            
+        elif backbone == "dinov2_vitb14":
             if timm is None:
                 raise ImportError("Please install timm: pip install timm")
             # timm model name can vary by timm version; this is the common one:
@@ -322,7 +338,14 @@ class HEFusedContrastiveModel(nn.Module):
         neighbor_mask = x[:, 3:4]
         center_mask = x[:, 4:5]
         
-        rgb_feat = self.rgb_encoder(rgb)                # [B, rgb_dim]
+        if self.backbone_name == "uni2h":
+        # expect UNI-preprocessed RGB already
+        # rgb shape should match UNI transform output size
+            with torch.no_grad():
+                rgb_feat = self.rgb_encoder(rgb)  # [B, rgb_dim]
+        else:
+            rgb_feat = self.rgb_encoder(rgb)                # [B, rgb_dim]
+            
         mask_feat = self.mask_branch(center_mask, neighbor_mask)  # [B, mask_feat_dim]
         feat = self.fusion(torch.cat([rgb_feat, mask_feat], dim=1))  # [B, fusion_dim]
         # z = self.projector(feat)                        # [B, proj_dim], normalized

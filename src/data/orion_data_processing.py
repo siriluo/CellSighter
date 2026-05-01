@@ -103,7 +103,8 @@ def load_cell_crops_from_orion(cell_patches_path: str, mask_name: str, img_patch
                         slices=None,
                         cells=mask_patch,
                         image=img_patch,
-                        coords_path=None)
+                        coords_path=np.array([cell_id, x, y]),
+                        orion_format=True)
             
             cell_crops.append(cell_crop)
     
@@ -168,16 +169,19 @@ def load_cell_crops_from_orion_with_cellid(cell_patches_path: str, mask_name: st
         img_patch = images[shard_indices[i]]
         mask_patch = masks[shard_indices[i]]
         
+        coords = [cell_id, x, y]
+        
         cell_crop = CellCrop(cell_id=1, # use the actual cell id from orion
                     image_id=f"{img_patch_name}_{file_id}_{i}",
                     label=int_label,
                     slices=None,
                     cells=mask_patch,
                     image=img_patch,
-                    coords_path=None)
+                    coords_path=np.array([cell_id, x, y]),
+                    orion_format=True)
         
         cell_crops.append(cell_crop)
-        coords_list.append([cell_id, x, y])
+        coords_list.append(coords)
         
     coords_list = np.array(coords_list)
     np.savez(f"cell_coords.npz", coords_list)

@@ -202,7 +202,7 @@ def set_loader(config: Dict[str, Any]):
     return train_loader, val_loader, test_loader
 
 
-def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
+def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
     
@@ -264,13 +264,15 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
             crop_size=config['crop_input_size'], # crop_input_size crop_size potentially replace with config['crop_input_size']
             shift=config.get('shift', 5),
             mask=use_mask,
+            use_uni=config.get('use_uni', False),
+            uni_transform=uni_transform
         )
         print("Using data augmentation for training")
     else:
-        train_transform = create_validation_transform(crop_size=config['crop_size'])
+        train_transform = create_validation_transform(crop_size=config['crop_size'], use_uni=config.get('use_uni', False), uni_transform=uni_transform)
         print("No data augmentation applied")
     
-    val_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    val_transform = create_validation_transform(crop_size=config['crop_input_size'], use_uni=config.get('use_uni', False), uni_transform=uni_transform)
     
     # Create datasets
     if config['classifier']:
@@ -399,13 +401,13 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # Then split into folds based on this.
     test_crc_samples = folders_perm[32:len(folders)]
     print(test_crc_samples)
-    print("fold 3")
+    print("fold 4")
     train_val_samples = folders_perm[:32]
     
     folds = 4
     splits = np.split(train_val_samples, folds)
     
-    val_fold = 1 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+    val_fold = 2 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
     crc_samples = []
     for i in range(folds):
         if i != val_fold:
@@ -531,18 +533,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"CUDA version: {torch.version.cuda}")
-    
-    # Create data loaders
-    if (not args.cifar) or (not args.classifier):
-        if not config.get("orion", False):
-            train_loader, val_loader = create_contrastive_data_loaders(config)
-        else: 
-            train_loader, val_loader = create_orion_data_loaders(config)
-        test_loader = None
-    else:
-        train_loader, val_loader, test_loader = set_loader(config)
-    # Get input channels from a sample
-    # sample_batch = next(iter(train_loader))
 
     if use_mask:
         input_channels = 5
@@ -561,7 +551,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         # 'num_classes': config['num_classes'],
     }
     if chosen_model == 'new_fused':
-        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14
+        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14 uni2h
         encoder_kwargs['freeze_backbone'] = False # True False
         
     projection_head_kwargs = {
@@ -603,6 +593,20 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Total parameters: {model_info['total_parameters']:,}")
     print(f"Trainable parameters: {model_info['trainable_parameters']:,}")
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
+    
+    uni_transform = model.encoder.uni_transform
+    
+    # Create data loaders
+    if (not args.cifar) or (not args.classifier):
+        if not config.get("orion", False):
+            train_loader, val_loader = create_contrastive_data_loaders(config, uni_transform=uni_transform)
+        else: 
+            train_loader, val_loader = create_orion_data_loaders(config)
+        test_loader = None
+    else:
+        train_loader, val_loader, test_loader = set_loader(config)
+    # Get input channels from a sample
+    # sample_batch = next(iter(train_loader))
     
     # Calculate class weights for balanced training
     if args.cifar == False:
@@ -648,7 +652,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             device=device,
             save_dir=save_dir,
             log_interval=config.get('log_interval', 50),
-            args=args
+            args=args,
+            config=config
         )
     else:
         use_graph = config.get('graph', False)

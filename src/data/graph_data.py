@@ -1,17 +1,22 @@
 import torch
 import numpy as np
 from torch_geometric.data import Data
+from torch_geometric.nn import knn_graph
 import pandas as pd
 import cv2
+
 
 class GraphDataConstructor:
     """
     Construct graph data with precomputed embeddings as node features.
     """
     
-    def __init__(self, embedding_model, device='cuda', coord_path=None):
+    def __init__(self, embedding_model, classifier, device='cuda', coord_path=None):
         self.embedding_model = embedding_model
+        self.classifier = classifier
         self.device = device
+        self.embedding_model.to(self.device)
+        self.classifier.to(self.device)
         self.embedding_model.eval()
 
         self.coord_path = coord_path or "/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed"
@@ -86,6 +91,86 @@ class GraphDataConstructor:
         
         return embeddings, labels_list, metadata, node_indices
     
+    
+    def extract_logits(self, dataloader, use_encoder=True):
+        """
+        Extract logits from all samples using upstream model.
+        
+        Args:
+            dataloader: DataLoader containing your raw data (images, text, etc.)
+            use_encoder: Whether to get the embeddings of only the encoder or encoder + projection head
+            
+        Returns:
+            logits: [num_nodes, num_classes]
+            labels: [num_nodes]
+            metadata: Additional information for each node
+            node_indices: Mapping from node index to sample index
+        """
+        logits = []
+        labels_list = []
+        coords_list = []
+        metadata = []
+        node_indices = []
+        # for metadata, store the image name?
+        
+        # iterate through dataloader with batch size 1?
+        # get coordinates:
+        node_idx = 0
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(dataloader):
+                images = batch['image']
+                labels = batch['label'] 
+
+                m = batch.get('mask', None)
+                if m is not None:
+                    images = torch.cat([images, m], dim=1)     
+
+                images = images.to(self.device, non_blocking=True)
+                labels = labels.detach().cpu()
+
+                # Extract embeddings
+                if use_encoder:
+                    feat = self.embedding_model.encoder(images)
+                else:
+                    _, _, feat = self.embedding_model(images)
+
+                output = self.classifier(feat)
+                logits.append(output.detach().cpu())
+                labels_list.append(labels)
+
+                # Support batch sizes > 1 while preserving node->sample mapping.
+                batch_size = feat.shape[0]
+                image_ids = batch["image_id"]
+                cell_ids = batch["cell_id"]
+                coords = batch["coordinates"] #.get("coordinates", None)
+
+                for i in range(batch_size):
+                    image_name = image_ids[i]
+                    if not isinstance(image_name, str):
+                        image_name = str(image_name)
+
+                    cell_id_val = cell_ids[i]
+                    if torch.is_tensor(cell_id_val):
+                        cell_id_val = int(cell_id_val.item())
+                    else:
+                        cell_id_val = int(cell_id_val)
+                        
+                    # print(i)
+                    cell_coord = coords[i] # if coords is not None else None
+                    
+                    metadata.append({"cell_id": cell_id_val, "image_id": image_name})
+                    coords_list.append(cell_coord.tolist())
+                    node_indices.append(node_idx)
+                    node_idx += 1
+                # when forming the adjacency matrix, use these coordinates for spatial graph construction
+        
+        logits = torch.cat(logits, dim=0)
+        labels_list = torch.cat(labels_list, dim=0)
+        coords_list = torch.tensor(coords_list) if coords_list is not None else None
+        
+        return logits, labels_list, coords_list, metadata, node_indices
+    
+    
     def construct_graph(self, embeddings, metadata, labels, node_indices, dist=40, edge_construction='knn'):
         """
         Construct graph from embeddings.
@@ -129,6 +214,7 @@ class GraphDataConstructor:
             edge_index=edge_index,
             edge_attr=edge_attr,
             y=correct_order_labels,
+            pos=None,  # Optional: Add positional encodings if needed
             node_dataset_idx=node_dataset_idx,
             cell_id=cell_ids,
             image_id_idx=image_id_idx
@@ -216,6 +302,41 @@ class GraphDataConstructor:
         node_indices = np.concatenate(node_indices, axis=0)
         
         return edge_index, node_indices, edge_attr
+    
+    
+    def construct_knn_smoothing(self, dataloader, k=5, alpha=0.8):
+        # For now, just focus on 1 or 2 test samples:
+        # ['CRC28' 'CRC26' 'CRC20' 'CRC13' 'CRC33_01' 'CRC27' 'CRC22']
+        temp_one_sample_path = "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000/CRC33_01"
+        # The node values
+        # first, get all the coordinates.
+        # use extract_logits
+        logits, labels_list, coords_list, metadata, node_indices = self.extract_logits(dataloader=dataloader)
+        
+        # store logits, labels_list, and coords_list into pytorch .pt files for later use in graph construction and GNN training.
+        save_path = "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/test_outputs"
+        torch.save(logits, f"{save_path}/logits.pt")
+        torch.save(labels_list, f"{save_path}/labels.pt")
+        torch.save(coords_list, f"{save_path}/coords.pt")
+        
+        # Use meta_data to get the coordinates and cells that correspond to the logits. Then use the coordinates to construct the knn graph. 
+        # The node features will just be the logits.
+        probs = torch.softmax(logits, dim=1)
+        
+        cell_ids_list = coords_list[:, 0] if coords_list is not None else None
+        coords = coords_list[:, 1:3].to(torch.float32) if coords_list is not None else None 
+        dist_mat = torch.cdist(coords, coords)
+        dist_mat.fill_diagonal_(float("inf"))
+        
+        nn_idx = torch.topk(dist_mat, k=k, largest=False).indices
+        
+        # now perform smoothing for each cell.
+        mean_neighbor_probs = probs[nn_idx].mean(dim=1)
+        
+        smoothed_probs = alpha * probs + (1 - alpha) * mean_neighbor_probs
+        
+        
+        return smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata
     
 
     def analyze_dataset(self, dataloader, distance=40):

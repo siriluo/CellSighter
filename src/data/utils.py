@@ -13,9 +13,11 @@ import torchvision
 import scipy.ndimage as ndimage
 import torch 
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict, Any, Optional, Callable
 from torchvision.transforms import Lambda
+import torchvision.transforms.functional as TF
 import cv2
 import pandas as pd
 from sklearn.preprocessing import label_binarize
@@ -34,7 +36,8 @@ class CellCrop:
                  slices: Tuple[slice, ...],
                  cells: np.ndarray,
                  image: np.ndarray,
-                 coords_path: str = None):
+                 coords_path = None,
+                 orion_format = False):
         """Initialize a CellCrop instance."""
         self._cell_id = cell_id
         self._image_id = image_id
@@ -45,12 +48,19 @@ class CellCrop:
         self._coordinates = None  # Placeholder for coordinates if needed
         # if coords_path, then access the coordinates located there, and grab the corresponding coordinates from 
         # the right image and right cell_id. Should be path/to/coords/{image_id}_cell_info.csv
-        if coords_path:
-            coordinates_df = pd.read_csv(coords_path)
-            y = coordinates_df["Y"].values # 'centroid-0' y_coord_scaled
-            x = coordinates_df["X"].values # 'centroid-1' x_coord_scaled\
-            cts = coordinates_df["CellType"].values
-            self._coordinates = np.array([y[self._cell_id - 1], x[self._cell_id - 1]]) # format of i, j
+        if coords_path is not None:
+            if isinstance(coords_path, str):
+                coordinates_df = pd.read_csv(coords_path)
+                y = coordinates_df["Y"].values # 'centroid-0' y_coord_scaled
+                x = coordinates_df["X"].values # 'centroid-1' x_coord_scaled\
+                cts = coordinates_df["CellType"].values
+                self._coordinates = np.array([y[self._cell_id - 1], x[self._cell_id - 1]]) # format of i, j
+            else:
+                if orion_format:
+                    # print("test")
+        # print("test coordinates")
+                    self._coordinates = coords_path
+        # print(self._coordinates)
 
     def sample(self, mask: bool = False) -> Dict[str, Any]:
         """Extract a sample of the cell region with optional masks."""
@@ -138,6 +148,32 @@ class ShiftAugmentation:
         return x
 
 
+def apply_uni_rgb_only(x: torch.Tensor, uni_transform):
+    """
+    x: [C,H,W], first 3 channels are RGB, remaining are mask channels.
+    uni_transform: official UNI transform callable (expects PIL RGB).
+    """
+    if x.size(0) < 3:
+        return x
+
+    rgb = x[:3]
+    extra = x[3:] if x.size(0) > 3 else None
+
+    # rgb_pil = TF.to_pil_image(rgb)
+    rgb_uni = uni_transform(rgb)  # [3, H_uni, W_uni]
+
+    if extra is None:
+        return rgb_uni
+
+    extra = F.interpolate(
+        extra.unsqueeze(0),
+        size=rgb_uni.shape[-2:],
+        mode="nearest",
+    ).squeeze(0)
+
+    return torch.cat([rgb_uni, extra], dim=0)
+
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD  = (0.229, 0.224, 0.225)
 
@@ -156,21 +192,22 @@ def normalize_rgb_only(x: torch.Tensor) -> torch.Tensor:
     return torch.cat([x_rgb, x[3:]], dim=0)
 
 
-def create_validation_transform(crop_size: int) -> Callable:
-    """Create transformation pipeline for validation data."""
-    return torchvision.transforms.Compose([
+def create_validation_transform(crop_size: int, use_uni: bool = False, uni_transform=None) -> Callable:
+    t = [
         torchvision.transforms.ToTensor(),
-        torchvision.transforms.Lambda(normalize_rgb_only),
-        torchvision.transforms.CenterCrop((crop_size, crop_size))
-    ])
+        torchvision.transforms.CenterCrop((crop_size, crop_size)),
+    ]
+    if use_uni:
+        t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
+    return torchvision.transforms.Compose(t)
 
 
-def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> Callable:
+def create_training_transform(crop_size: int, shift: int, mask: bool = True, use_uni: bool = False, uni_transform=None) -> Callable:
     """Create transformation pipeline for training data."""
     augmentor = ImageAugmentor()
 
     if mask:
-        return torchvision.transforms.Compose([
+        t = [
             torchvision.transforms.Lambda(augmentor.poisson_sampling),
             torchvision.transforms.Lambda(augmentor.augment_cell_shape),
             torchvision.transforms.Lambda(augmentor.augment_environment_shape),
@@ -182,9 +219,9 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
             torchvision.transforms.CenterCrop((crop_size, crop_size)),
             torchvision.transforms.RandomHorizontalFlip(p=0.75),
             torchvision.transforms.RandomVerticalFlip(p=0.75),
-        ])
+        ]
     else:
-        return torchvision.transforms.Compose([
+        t = [
             torchvision.transforms.ToTensor(),
             torchvision.transforms.RandomRotation(degrees=(0, 360)),
             # Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
@@ -195,7 +232,12 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True) -> 
             # torchvision.transforms.RandomApply([
             #     torchvision.transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
             # ], p=0.8),
-        ])
+        ]
+    
+    if use_uni:
+        t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
+    
+    return torchvision.transforms.Compose(t)
 
 
 def set_backbone_trainability(model: nn.Module, trainable: bool):

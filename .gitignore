@@ -174,3 +174,9 @@ ct_class_training_job.sbatch
 ct_class_training_job.sbatch
 results_orion_top_results_test1/topk_accs.json
 results_orion_topk_results_test2/topk_accs.json
+src/results_graph_analysis_testing1/list_of_labels.npz
+src/results_graph_analysis_testing1/list_of_logits.npz
+src/results_graph_analysis_testing1/topk_accs.json
+src/con_classifier_testing_checkpoints_orion_topk/list_of_labels.npz
+src/con_classifier_testing_checkpoints_orion_topk/list_of_logits.npz
+src/con_classifier_testing_checkpoints_orion_topk/topk_accs.json
