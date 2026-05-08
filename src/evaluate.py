@@ -410,6 +410,9 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
+    if chosen_model == 'new_fused':
+        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14 uni2h
+        encoder_kwargs['freeze_backbone'] = False # True False
     projection_head_kwargs = {
         'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34  2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
@@ -419,7 +422,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     classification_head_kwargs = {
         # 'input_dim': 512,
         'num_classes': config['num_classes'],
-        'dropout_rate': 0.5,
+        'dropout_rate': 0.2,
         'name': chosen_model, # resnet50 resnet18
     }
     model = create_contrastive_model(

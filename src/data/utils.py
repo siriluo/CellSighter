@@ -68,7 +68,7 @@ class CellCrop:
             result = {
                 'cell_id': self._cell_id,
                 'image_id': self._image_id,
-                'image': self._image[self._slices].astype(np.float32) if self._slices is not None else self._image.astype(np.float32),
+                'image': self._image[self._slices].astype(np.uint8) if self._slices is not None else self._image.astype(np.uint8), # .astype(np.float32)
                 'slice_x_start': self._slices[0].start if self._slices is not None else self._slices,
                 'slice_y_start': self._slices[1].start if self._slices is not None else self._slices,
                 'slice_x_end': self._slices[0].stop if self._slices is not None else self._slices,
@@ -79,7 +79,7 @@ class CellCrop:
             result = {
                 'cell_id': self._cell_id,
                 'image_id': self._image_id,
-                'image': self._image.astype(np.float32),
+                'image': self._image.astype(np.uint8), # .astype(np.float32)
                 'label': np.array(self._label, dtype=np.longlong),
             }
 
@@ -195,10 +195,11 @@ def normalize_rgb_only(x: torch.Tensor) -> torch.Tensor:
 def create_validation_transform(crop_size: int, use_uni: bool = False, uni_transform=None) -> Callable:
     t = [
         torchvision.transforms.ToTensor(),
+        torchvision.transforms.Lambda(normalize_rgb_only),
         torchvision.transforms.CenterCrop((crop_size, crop_size)),
     ]
-    if use_uni:
-        t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
+    # if use_uni:
+    #     t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
     return torchvision.transforms.Compose(t)
 
 
@@ -223,6 +224,7 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True, use
     else:
         t = [
             torchvision.transforms.ToTensor(),
+            torchvision.transforms.Lambda(normalize_rgb_only),
             torchvision.transforms.RandomRotation(degrees=(0, 360)),
             # Lambda(lambda x: ShiftAugmentation(shift_max=shift, n_size=crop_size)(x) 
             #     if np.random.random() < 0.5 else x),
@@ -234,8 +236,8 @@ def create_training_transform(crop_size: int, shift: int, mask: bool = True, use
             # ], p=0.8),
         ]
     
-    if use_uni:
-        t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
+    # if use_uni:
+    #     t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
     
     return torchvision.transforms.Compose(t)
 

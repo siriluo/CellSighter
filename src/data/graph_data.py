@@ -328,6 +328,9 @@ class GraphDataConstructor:
         dist_mat = torch.cdist(coords, coords)
         dist_mat.fill_diagonal_(float("inf"))
         
+        # Only improve the radius
+        # only apply smoothing to cells if it has low probability.
+        
         nn_idx = torch.topk(dist_mat, k=k, largest=False).indices
         
         # now perform smoothing for each cell.

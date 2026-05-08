@@ -140,7 +140,7 @@
     "reg050_B"
   ],
   "num_classes": 10,
-  "epoch_max": 30,
+  "epoch_max": 50,
   "lr": 0.0005,
   "proj_lr": 0.0005,
   "batch_size": 2048,
@@ -153,7 +153,7 @@
     "1": "tumor cells"
   },
   "aug": true,
-  "save_dir": "./contrastive_checkpoints_orion_fold1",
+  "save_dir": "./contrastive_checkpoints_orion",
   "ckpt_path": "",
   "classifier": false,
   "graph": false,

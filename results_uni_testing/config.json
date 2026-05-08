@@ -1,8 +1,9 @@
 {
-  "crop_input_size": 64,
+  "crop_input_size": 128,
   "crop_size": 128,
   "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/crc_codex_better_masks",
   "orion": false,
+  "use_uni": true,
   "train_set": [
     "reg001_A",
     "reg002_A",
@@ -67,7 +68,7 @@
   "epoch_max": 60,
   "lr": 0.0005,
   "proj_lr": 0.0002,
-  "batch_size": 2048,
+  "batch_size": 512,
   "num_workers": 16,
   "weight_to_eval": "",
   "sample_batch": false,

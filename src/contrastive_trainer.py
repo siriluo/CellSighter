@@ -201,7 +201,7 @@ class ContrastiveTrainer:
 
     def train_epoch(self, train_loader, model, criterion, optimizer, epoch): # , opt
         """one epoch training"""
-        # model.train()
+        model.train()
         
 
         batch_time = AverageMeter()
@@ -387,11 +387,11 @@ class ContrastiveTrainer:
             # Validation
             val_metrics = self.validate()
 
-            # Update learning rate schedule
-            if self.scheduler:
-                self.scheduler.step()
-                current_lr = self.optimizer.param_groups[0]['lr']
-                self.history['learning_rates'].append(current_lr)
+            # # Update learning rate schedule
+            # if self.scheduler:
+            #     self.scheduler.step()
+            #     current_lr = self.optimizer.param_groups[0]['lr']
+            #     self.history['learning_rates'].append(current_lr)
             
             # Record history
             self.history['train_loss'].append(train_loss)

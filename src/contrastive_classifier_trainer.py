@@ -10,7 +10,7 @@ import csv
 import torch
 import torch.backends.cudnn as cudnn
 from torchvision import transforms, datasets
-from util.utils import AverageMeter, warmup_learning_rate
+from util.utils import AverageMeter, adjust_learning_rate, warmup_learning_rate
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -437,6 +437,8 @@ class ConClassTrainer:
         for epoch in range(num_epochs):
             epoch_start_time = time.time()
             
+            adjust_learning_rate(self.args, self.optimizer, epoch)
+            
             # Training
             train_loss = self.train_epoch(self.train_loader, self.encoder_model, self.classifier, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
@@ -444,10 +446,12 @@ class ConClassTrainer:
             val_metrics = self.validate()
             
             # Update learning rate
-            if self.scheduler:
-                self.scheduler.step()
-                current_lr = self.optimizer.param_groups[0]['lr']
-                self.history['learning_rates'].append(current_lr)
+            
+            # Should I use this scheduler?
+            # if self.scheduler:
+            #     self.scheduler.step()
+            #     current_lr = self.optimizer.param_groups[0]['lr']
+            #     self.history['learning_rates'].append(current_lr)
             
             # Record history
             self.history['train_loss'].append(train_loss)

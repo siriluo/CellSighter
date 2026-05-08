@@ -84,6 +84,7 @@ class ConClassEvaluator:
         self.config = config
 
         self.encoder_model, self.classifier, self.criterion = self.set_model(self.model, self.encoder_ckpt, classifier=self.classifier, criterion=self.criterion)
+        # self.classifier = self.classifier.to(device)
         
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)
@@ -248,7 +249,7 @@ class ConClassEvaluator:
             classifier = classifier.cuda()
             criterion = criterion.cuda()
             cudnn.benchmark = True
-
+            print(f"Loading model from {checkpoint_path}")
             model_to_load.load_state_dict(state_dict)
         else:
             raise NotImplementedError('This code requires GPU')
@@ -373,8 +374,8 @@ class ConClassEvaluator:
         if self.config['batch_size'] > 1:
             list_of_logits = [item for sublist in list_of_logits for item in sublist]
             list_of_labels = [item for sublist in list_of_labels for item in sublist]
-        list_of_logits = torch.tensor(list_of_logits).squeeze(1)
-        list_of_labels = torch.tensor(list_of_labels).squeeze(1)
+        list_of_logits = torch.tensor(list_of_logits) #.squeeze(1)
+        list_of_labels = torch.tensor(list_of_labels) #.squeeze(1)
         topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
         
         save_path = self.config.get('save_dir', './test_checkpoints')

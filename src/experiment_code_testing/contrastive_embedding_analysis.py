@@ -22,7 +22,7 @@ from data.data import CellCropsDataset
 from contrastive_runner import create_contrastive_model
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
 from models import create_model, get_model_info, CellEncoderResNet
-from knn_algorithm import knn_count
+from experiment_code_testing.knn_algorithm import knn_count
 
 
 use_mask = True
@@ -98,6 +98,7 @@ def set_model(model, checkpoint_path):
         # classifier = classifier.cuda()
         # criterion = criterion.cuda()
         # cudnn.benchmark = True
+        print(f"Loading model from {checkpoint_path}")
 
         model_to_load.load_state_dict(state_dict)
     else:

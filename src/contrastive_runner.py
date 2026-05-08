@@ -86,12 +86,6 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         )
         print("Adam")
     else:
-        ## Test optimizer with multiple LRs
-        # optimizer = optim.SGD([
-        #         {'params': model.encoder.parameters(), 'lr': config['lr'], 'name': 'encoder'},
-        #         {'params': model.projection_head.parameters(), 'lr': config['proj_lr'], "weight_decay": 0.0, 'name': 'projection_head'},],
-        #         momentum=0.9,
-        #         weight_decay=1e-4)
         # optimizer = optim.SGD(model.parameters(),
         #         lr=config['lr'],
         #         momentum=0.9,
@@ -401,13 +395,13 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # Then split into folds based on this.
     test_crc_samples = folders_perm[32:len(folders)]
     print(test_crc_samples)
-    print("fold 4")
+    print("fold 1")
     train_val_samples = folders_perm[:32]
     
     folds = 4
     splits = np.split(train_val_samples, folds)
     
-    val_fold = 2 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+    val_fold = 3 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
     crc_samples = []
     for i in range(folds):
         if i != val_fold:

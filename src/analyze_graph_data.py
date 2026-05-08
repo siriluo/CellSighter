@@ -537,7 +537,7 @@ def main(config_path: str, args=None):
     
     graph_evaluator = GraphDataConstructor(embedding_model=model, classifier=classifier, device=device)
     
-    smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata = graph_evaluator.construct_knn_smoothing(test_loader, k=5, alpha=0.8)
+    smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata = graph_evaluator.construct_knn_smoothing(test_loader, k=5, alpha=1)
     
     results = inside_eval(config=config, list_of_logits=logits, list_of_labels=labels_list, list_of_probs=smoothed_probs, num_classes=config['num_classes'])
     

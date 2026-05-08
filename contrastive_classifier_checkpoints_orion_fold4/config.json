@@ -140,10 +140,10 @@
     "reg050_B"
   ],
   "num_classes": 10,
-  "epoch_max": 30,
-  "lr": 0.0005,
-  "proj_lr": 0.0005,
-  "batch_size": 2048,
+  "epoch_max": 100,
+  "lr": 0.0001,
+  "proj_lr": 0.0001,
+  "batch_size": 1024,
   "num_workers": 32,
   "weight_to_eval": "",
   "sample_batch": false,
@@ -153,9 +153,8 @@
     "1": "tumor cells"
   },
   "aug": true,
-  "save_dir": "./contrastive_checkpoints_orion_fold1",
-  "ckpt_path": "",
-  "classifier": false,
-  "graph": false,
-  "pretrained_test": true
+  "save_dir": "./contrastive_classifier_checkpoints_orion_fold4",
+  "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_checkpoints_orion_fold4/best_model.pth",
+  "classifier": true,
+  "graph": false
 }

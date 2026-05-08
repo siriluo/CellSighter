@@ -79,7 +79,7 @@ class CellCropsDataset(Dataset):
                 sample['image'],
                 sample['all_cells_mask'][:, :, np.newaxis],
                 sample['mask'][:, :, np.newaxis]
-            ])
+            ]) # .astype(np.uint8)
             
             # Apply transforms
             if self._transform:
@@ -99,6 +99,6 @@ class CellCropsDataset(Dataset):
                 # print("breaking point")
                 # print(sample['image'].shape)
                 # print(self._transform(np.dstack([sample['image']])).float().shape)
-                sample['image'] = self._transform(np.dstack([sample['image']])) # [image, image] for TwoCropTransform
+                sample['image'] = self._transform(np.dstack([sample['image']]).astype(np.uint8)) # [image, image] for TwoCropTransform
         
         return sample
