@@ -30,7 +30,7 @@
     "to_pad": false,
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": true,
-    "save_dir": "./contrastive_checkpoints_orion_fold1",
+    "save_dir": "./contrastive_checkpoints_orion_fold1_test2",
     "ckpt_path": "",
     "classifier": false,
     "graph": false,

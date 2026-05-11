@@ -184,9 +184,17 @@ def normalize_rgb_only(x: torch.Tensor) -> torch.Tensor:
     """
     if x.size(0) < 3:
         return x
-    mean = x.new_tensor(IMAGENET_MEAN).view(3, 1, 1)
-    std = x.new_tensor(IMAGENET_STD).view(3, 1, 1)
-    x_rgb = (x[:3] - mean) / std
+    
+    rgb = x[:3].float()
+
+    # If float data is still in 0..255 range, scale to 0..1
+    if rgb.max() > 1.0:
+        rgb = rgb / 255.0
+    
+    mean = rgb.new_tensor(IMAGENET_MEAN).view(3, 1, 1)
+    std = rgb.new_tensor(IMAGENET_STD).view(3, 1, 1)
+    
+    x_rgb = (rgb - mean) / std
     if x.size(0) == 3:
         return x_rgb
     return torch.cat([x_rgb, x[3:]], dim=0)
