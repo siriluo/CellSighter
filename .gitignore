@@ -53,6 +53,8 @@ Thumbs.db
 results/
 checkpoints/
 experiment_results/
+*/list_of_labels.npz
+*/list_of_logits.npz
 *.pth
 *.ckpt
 *.h5

@@ -29,7 +29,7 @@ from gat_model import GATv2ClassificationHead
 # from contrastive_trainer import ContrastiveTrainer
 # from contrastive_classifier_trainer import ConClassTrainer
 # from contrastive_gat_classifier_trainer import ConClassGraphTrainer
-from data.utils import load_samples, create_training_transform, create_validation_transform
+from data.utils import load_samples, create_training_transform, create_validation_transform, create_test_transform
 from data.orion_data_processing import load_cell_crops_from_orion
 from data.data import CellCropsDataset
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
@@ -390,14 +390,14 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # count
     print("Loading testing data...")
     test_crops = []
-    for sample in test_crc_samples_single:
+    for sample in test_crc_samples:
         filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
         crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
         test_crops.extend(crops)
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
-    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    test_transform = create_test_transform(crop_size=config['crop_input_size'])
     
     # Create datasets
     test_dataset = CellCropsDataset(
@@ -467,6 +467,9 @@ def main(config_path: str, args=None):
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
+    if chosen_model == 'new_fused':
+        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14 uni2h
+        encoder_kwargs['freeze_backbone'] = False # True False
     projection_head_kwargs = {
         'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34  2048 512 ConvNeXtV2: 768 256
         # 'activation': nn.ReLU(),
@@ -546,7 +549,7 @@ def main(config_path: str, args=None):
     print("EVALUATION COMPLETED")
 
     # save results json
-    with open(f"{save_dir}/evaluation_results_graph_analysis.json", 'w') as f:
+    with open(f"{save_dir}/evaluation_results_graph_analysis_testfold4.json", 'w') as f:
         json.dump(results, f, indent=4)
     
     return smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata, results

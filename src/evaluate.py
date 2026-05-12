@@ -27,7 +27,7 @@ from gat_model import GATv2ClassificationHead
 # from contrastive_trainer import ContrastiveTrainer
 # from contrastive_classifier_trainer import ConClassTrainer
 # from contrastive_gat_classifier_trainer import ConClassGraphTrainer
-from data.utils import load_samples, create_training_transform, create_validation_transform
+from data.utils import load_samples, create_training_transform, create_validation_transform, create_test_transform
 from data.orion_data_processing import load_cell_crops_from_orion
 from data.data import CellCropsDataset
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
@@ -334,7 +334,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
-    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    test_transform = create_test_transform(crop_size=config['crop_input_size'])
     
     # Create datasets
     test_dataset = CellCropsDataset(

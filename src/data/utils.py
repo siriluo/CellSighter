@@ -211,6 +211,40 @@ def create_validation_transform(crop_size: int, use_uni: bool = False, uni_trans
     return torchvision.transforms.Compose(t)
 
 
+def normalize_rgb_only_test(x: torch.Tensor) -> torch.Tensor:
+    """
+    x: [C,H,W], with channels like [R,G,B,(optional extra channels...)]
+    Normalizes only first 3 channels.
+    """
+    if x.size(0) < 3:
+        return x
+    
+    rgb = x[:3].float()
+
+    # If float data is still in 0..255 range, scale to 0..1
+    # if rgb.max() > 1.0:
+    #     rgb = rgb / 255.0
+    
+    mean = rgb.new_tensor(IMAGENET_MEAN).view(3, 1, 1)
+    std = rgb.new_tensor(IMAGENET_STD).view(3, 1, 1)
+    
+    x_rgb = (rgb - mean) / std
+    if x.size(0) == 3:
+        return x_rgb
+    return torch.cat([x_rgb, x[3:]], dim=0)
+
+
+def create_test_transform(crop_size: int, use_uni: bool = False, uni_transform=None) -> Callable:
+    t = [
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Lambda(normalize_rgb_only_test),
+        torchvision.transforms.CenterCrop((crop_size, crop_size)),
+    ]
+    # if use_uni:
+    #     t.append(torchvision.transforms.Lambda(lambda x: apply_uni_rgb_only(x, uni_transform)))
+    return torchvision.transforms.Compose(t)
+
+
 def create_training_transform(crop_size: int, shift: int, mask: bool = True, use_uni: bool = False, uni_transform=None) -> Callable:
     """Create transformation pipeline for training data."""
     augmentor = ImageAugmentor()
@@ -356,8 +390,8 @@ def topk_accuracy(logits: torch.Tensor, targets: torch.Tensor, ks=(1, 3, 5)):
         correct_k = correct[:k].any(dim=0).float().mean() * 100.0
         out[f"top{k}"] = correct_k.item()
         
-    out[f"topk_values"] = values.cpu().numpy().tolist()
-    out[f"topk_preds"] = pred.cpu().numpy().tolist()
+    # out[f"topk_values"] = values.cpu().numpy().tolist()
+    # out[f"topk_preds"] = pred.cpu().numpy().tolist()
      
     return out
 
