@@ -26,7 +26,7 @@
     "lr": 1e-2,
     "proj_lr": 1e-2,
     "batch_size": 512,
-    "num_workers": 24,
+    "num_workers": 16,
     "weight_to_eval": "",
     "sample_batch": false,
     "to_pad": false,

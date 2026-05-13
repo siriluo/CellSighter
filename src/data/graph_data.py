@@ -18,6 +18,7 @@ class GraphDataConstructor:
         self.embedding_model.to(self.device)
         self.classifier.to(self.device)
         self.embedding_model.eval()
+        self.classifier.eval()
 
         self.coord_path = coord_path or "/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed"
     
@@ -116,6 +117,11 @@ class GraphDataConstructor:
         # iterate through dataloader with batch size 1?
         # get coordinates:
         node_idx = 0
+        
+        # Ensure deterministic inference behavior (e.g., disable dropout/batchnorm updates).
+        self.embedding_model.eval()
+        self.classifier.eval()
+
         with torch.no_grad():
             for batch_idx, batch in enumerate(dataloader):
                 images = batch['image']
