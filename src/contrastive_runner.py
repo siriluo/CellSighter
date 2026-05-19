@@ -23,6 +23,7 @@ sys.path.insert(0, str(src_dir))
 from models import create_model, get_model_info
 from contrastive_learn_add import ClassificationHead2, ContrastiveModel, ProjectionHead, ClassificationHead
 from gat_model import GATv2ClassificationHead
+from adversarial_contrastive_trainer import AdversarialContrastiveTrainer
 from contrastive_trainer import ContrastiveTrainer
 from contrastive_classifier_trainer import ConClassTrainer
 from contrastive_gat_classifier_trainer import ConClassGraphTrainer
@@ -32,6 +33,7 @@ from data.orion_data_processing import load_cell_crops_from_orion
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
 from data.custom_samplers import TwoStageBalancedSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
+from domain_adaptation import DomainDiscriminator
 from util.utils import TwoCropTransform
 
 
@@ -207,15 +209,6 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
         Tuple of (train_loader, val_loader)
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
-    # folds = ["fold1"]
-    # for fold in folds:
-    #     fold_path = f"{patches_path}/{fold}"
-
-    #     os.makedirs(f"{save_cs_path}/cells2labels/{fold}", exist_ok=True)
-
-    #     fold_file_names = os.listdir(fold_path)
-    #     fold_file_names = [f for f in fold_file_names if os.path.isfile(fold_path + "/" + f)]
-    # image_names = fold_file_names
     use_xenium = config.get("xenium", False)
 
     if use_xenium:
@@ -231,7 +224,6 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
             tr_fold_file_names = os.listdir(fold_path)
             tr_fold_file_names = [f"{fold}/{f.split('.')[0]}" for f in tr_fold_file_names if os.path.isfile(fold_path + "/" + f)]
             train_image_names.extend(tr_fold_file_names)
-
 
         val_image_names = []
         for fold in val_folds:
@@ -368,52 +360,153 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
     return train_loader, val_loader
 
 
+def create_adversarial_target_loader(config: Dict[str, Any], uni_transform=None) -> DataLoader:
+    """
+    Create an unlabeled target-domain loader for DANN.
+
+    The existing crop loader expects labels to exist in the source data format, but
+    this path ignores target labels and only uses the crops for domain alignment.
+    """
+    adv_config = config.get("adversarial", {})
+    target_config = dict(config)
+
+    target_config_path = adv_config.get("target_config_path")
+    if target_config_path:
+        with open(target_config_path, "r") as f:
+            target_config.update(json.load(f))
+
+    if adv_config.get("target_root_dir"):
+        target_config["root_dir"] = adv_config["target_root_dir"]
+
+    target_set = (
+        adv_config.get("target_set")
+        or target_config.get("target_set")
+        or build_pannuke_target_set(target_config, adv_config)
+        or target_config.get("train_set")
+    )
+    if not target_set:
+        raise ValueError(
+            "Adversarial training requires adversarial.target_set, "
+            "adversarial.pannuke_folds, target_set, or a target_config_path with train_set."
+        )
+
+    use_xenium = target_config.get("xenium", False)
+    target_crops = load_samples(
+        target_config,
+        target_set,
+        already_cropped=True,
+        testing=True,
+        coords_path=None,  # Ensure coords_path is None to avoid loading coordinates for target domain
+    )
+    if len(target_crops) == 0:
+        raise ValueError("Adversarial target loader found 0 target-domain crops.")
+    print(f"Loaded {len(target_crops)} target-domain samples for adversarial adaptation")
+
+    if config.get("aug", False):
+        target_transform = create_training_transform(
+            crop_size=config["crop_input_size"],
+            shift=config.get("shift", 5),
+            mask=use_mask,
+            use_uni=config.get("use_uni", False),
+            uni_transform=uni_transform,
+        )
+    else:
+        target_transform = create_validation_transform(
+            crop_size=config["crop_input_size"],
+            use_uni=config.get("use_uni", False),
+            uni_transform=uni_transform,
+        )
+
+    target_dataset = CellCropsDataset(
+        crops=target_crops,
+        transform=TwoCropTransform(target_transform),
+        mask=use_mask,
+        contrastive=True,
+    )
+
+    return DataLoader(
+        target_dataset,
+        batch_size=adv_config.get("target_batch_size", config["batch_size"]),
+        shuffle=True,
+        num_workers=adv_config.get("target_num_workers", config["num_workers"]),
+        pin_memory=True if torch.cuda.is_available() else False,
+        drop_last=adv_config.get("target_drop_last", False),
+    )
+
+
+def build_pannuke_target_set(target_config: Dict[str, Any], adv_config: Dict[str, Any]):
+    pannuke_folds = adv_config.get("pannuke_folds") or target_config.get("pannuke_folds")
+    if not pannuke_folds:
+        return None
+
+    cells_dir = os.path.join(target_config["root_dir"], "CellTypes", "cells")
+    target_set = []
+    for fold in pannuke_folds:
+        fold_name = str(fold)
+        if fold_name.startswith("f"):
+            fold_name = fold_name[1:]
+        pattern = os.path.join(cells_dir, f"pannuke_f{fold_name}_*.npz")
+        fold_ids = [os.path.splitext(os.path.basename(path))[0] for path in glob.glob(pattern)]
+        fold_ids = sorted(fold_ids, key=pannuke_image_sort_key)
+        print(f"Found {len(fold_ids)} PanNuke target images for fold {fold_name}")
+        target_set.extend(fold_ids)
+
+    return target_set
+
+
+def pannuke_image_sort_key(image_id: str):
+    parts = image_id.split("_")
+    try:
+        return int(parts[-1])
+    except ValueError:
+        return image_id
+
+
 def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
-    
+
     Args:
         config: Configuration dictionary
-        
+
     Returns:
         Tuple of (train_loader, val_loader)
     """
-    # In this case, we can get the image names by looping through the files instead for our situation: 
+    # In this case, we can get the image names by looping through the files instead for our situation:
     cell_patches_path = config["root_dir"]
-    
+
     # set random seed for reproducibility
     np.random.seed(42)
-    
+
     # First get the list of folders and shuffle them to ensure random distribution of samples across folds
     # /taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000
     folders = glob.glob("CRC*", root_dir=cell_patches_path)
     perm_indices = np.random.permutation(len(folders))
-    
+
     folders_perm = np.array(folders)
     folders_perm = folders_perm[perm_indices]
-    
+
     # Then split into folds based on this.
     test_crc_samples = folders_perm[32:len(folders)]
     print(test_crc_samples)
-    print("fold 1")
+    print("fold 2")
     train_val_samples = folders_perm[:32]
-    
+
     folds = 4
     splits = np.split(train_val_samples, folds)
-    
-    val_fold = 3 # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+
+    val_fold = 2  # fold1: 3, fold2: 0, fold3: 1, fold4: 2
     crc_samples = []
     for i in range(folds):
         if i != val_fold:
             crc_samples.append(splits[i])
     crc_samples = np.concatenate(crc_samples)
-    
+
     val_crc_samples = splits[val_fold]
-    
-    
+
     # print(folders)
-    
-    # crc_samples = ["CRC01", "CRC02", "CRC04", "CRC05", "CRC06", "CRC09", "CRC10", "CRC11", "CRC12", "CRC13", 
+
+    # crc_samples = ["CRC01", "CRC02", "CRC04", "CRC05", "CRC06", "CRC09", "CRC10", "CRC11", "CRC12", "CRC13",
     #                "CRC14", "CRC15", "CRC16", "CRC17", "CRC18", "CRC19", "CRC20"] # , "CRC04"
     # val_crc_sample = "CRC07"
 
@@ -424,20 +517,36 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
 
     # count
     print("Loading testing data...")
+    sample_fraction = config.get("orion_sample_fraction", None)
+    train_sample_fraction = config.get("orion_train_sample_fraction", sample_fraction)
+    val_sample_fraction = config.get("orion_val_sample_fraction", sample_fraction)
+    train_max_per_sample = config.get("orion_train_max_per_sample", None)
+    val_max_per_sample = config.get("orion_val_max_per_sample", None)
+    sample_seed = config.get("orion_sample_seed", 42)
+
     training_crops = []
-    for sample in crc_samples:
+    for sample_idx, sample in enumerate(crc_samples):
         filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
-        crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
+        crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name,
+                                           filelist,
+                                           sample_fraction=train_sample_fraction,
+                                           max_samples=train_max_per_sample,
+                                           sample_seed=sample_seed + sample_idx)
         training_crops.extend(crops)
+        print(sample)
 
     # maybe use the last 10 files for validation and the rest for training?
-    # validation_filelist = glob.glob(f"{cell_patches_path}/{val_crc_sample}/{labels_name}_*.csv")
-    
+
     test_crops = []
-    for sample in val_crc_samples:
+    for sample_idx, sample in enumerate(val_crc_samples):
         validation_filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
-        val_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, validation_filelist)
+        val_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name,
+                                               validation_filelist,
+                                               sample_fraction=val_sample_fraction,
+                                               max_samples=val_max_per_sample,
+                                               sample_seed=sample_seed + 10000 + sample_idx)
         test_crops.extend(val_crops)
+        print(sample)
     # test_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{val_crc_sample}", mask_name, img_patch_name, labels_name, validation_filelist)
     # test_crops = load_samples(config, image_names, testing=True)
     print(f"Loaded {len(test_crops)} testing samples")
@@ -445,7 +554,8 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # Create transforms
     if config.get('aug', False):
         train_transform = create_training_transform(
-            crop_size=config['crop_input_size'], # crop_input_size crop_size potentially replace with config['crop_input_size']
+            crop_size=config['crop_input_size'],
+            # crop_input_size crop_size potentially replace with config['crop_input_size']
             shift=config.get('shift', 5),
             mask=use_mask,
         )
@@ -453,9 +563,9 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     else:
         train_transform = create_validation_transform(crop_size=config['crop_size'])
         print("No data augmentation applied")
-        
+
     test_transform = create_validation_transform(crop_size=config['crop_input_size'])
-    
+
     # Create datasets
     if config['classifier']:
         train_dataset = CellCropsDataset(
@@ -483,7 +593,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
             mask=use_mask,
             contrastive=True,
         )
-    
+
     # Create data loaders
     use_graph = config.get('graph', False)
 
@@ -496,12 +606,12 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     )
     test_loader = DataLoader(
         test_dataset,
-        batch_size=config['batch_size'], #  1
+        batch_size=config['batch_size'],  # 1
         shuffle=False,
         num_workers=config['num_workers'],
         pin_memory=True if torch.cuda.is_available() else False
     )
-    
+
     return train_loader, test_loader
 
 
@@ -599,11 +709,23 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         test_loader = None
     else:
         train_loader, val_loader, test_loader = set_loader(config)
+
+    use_adversarial = config.get("adversarial", {}).get("enabled", False)
+    target_loader = None
+    if use_adversarial:
+        if args.classifier:
+            raise ValueError("Adversarial adaptation is currently implemented for SupCon encoder training only.")
+        if args.cifar:
+            raise ValueError("Adversarial adaptation is intended for H&E cell crops, not the CIFAR debug path.")
+        target_loader = create_adversarial_target_loader(config, uni_transform=uni_transform)
+
     # Get input channels from a sample
     # sample_batch = next(iter(train_loader))
     
-    # Calculate class weights for balanced training
-    if args.cifar == False:
+    # Class weights are only used for classifier CE training; computing them
+    # iterates the whole loader and is very slow for Orion SupCon/ADA debug runs.
+    class_weights = None
+    if args.classifier and args.cifar == False:
         class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
@@ -618,7 +740,25 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             criterion = nn.CrossEntropyLoss()
     
     # Create optimizer and scheduler
-    if not args.classifier:
+    domain_discriminator = None
+    if use_adversarial:
+        adv_config = config.get("adversarial", {})
+        domain_discriminator = DomainDiscriminator(
+            in_dim=model_dict[chosen_model],
+            hidden_dim=adv_config.get("domain_hidden_dim", 256),
+            num_domains=adv_config.get("num_domains", 2),
+            dropout=adv_config.get("domain_dropout", 0.2),
+        )
+        optimizer = optim.Adam(
+            list(model.parameters()) + list(domain_discriminator.parameters()),
+            lr=config["lr"],
+            weight_decay=config.get("weight_decay", 1e-4),
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=config.get("epoch_max", 100), eta_min=1e-6
+        )
+        print("Adam with domain discriminator")
+    elif not args.classifier:
         optimizer, scheduler = create_optimizer_and_scheduler(model, config)
     else:
         optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
@@ -634,7 +774,24 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Configuration saved to {config_save_path}")
     
     # Create trainer
-    if not args.classifier:
+    if use_adversarial:
+        trainer = AdversarialContrastiveTrainer(
+            model=model,
+            domain_discriminator=domain_discriminator,
+            target_loader=target_loader,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            num_classes=config["num_classes"],
+            scheduler=scheduler,
+            device=device,
+            save_dir=save_dir,
+            log_interval=config.get("log_interval", 50),
+            args=args,
+            config=config,
+        )
+    elif not args.classifier:
         trainer = ContrastiveTrainer(
             model=model,
             train_loader=train_loader,
@@ -692,9 +849,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             print(f"Resumed training from epoch {start_epoch}")
         else:
             print(f"Checkpoint not found: {resume_checkpoint}")
-
-    # history = {}
-    # eval_results = {}
 
     # trainer.debug_gat()
     

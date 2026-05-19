@@ -45,7 +45,15 @@ def get_multiclass_ct_name(label):
     return class_name
 
 
-def load_cell_crops_from_orion(cell_patches_path: str, mask_name: str, img_patch_name: str, labels_name: str, label_files) -> List[CellCrop]:
+def load_cell_crops_from_orion(
+        cell_patches_path: str,
+        mask_name: str,
+        img_patch_name: str,
+        labels_name: str,
+        label_files,
+        sample_fraction=None,
+        max_samples=None,
+        sample_seed: int = 42) -> List[CellCrop]:
     """
     Load cell crops from the Orion dataset.
     
@@ -57,6 +65,17 @@ def load_cell_crops_from_orion(cell_patches_path: str, mask_name: str, img_patch
     Returns:
         List of CellCrop objects
     """
+    if sample_fraction is not None or max_samples is not None:
+        return load_sampled_cell_crops_from_orion(
+            cell_patches_path=cell_patches_path,
+            mask_name=mask_name,
+            img_patch_name=img_patch_name,
+            label_files=label_files,
+            sample_fraction=sample_fraction,
+            max_samples=max_samples,
+            sample_seed=sample_seed,
+        )
+
     cell_crops = []
      
     # Load labels
@@ -103,13 +122,98 @@ def load_cell_crops_from_orion(cell_patches_path: str, mask_name: str, img_patch
                         slices=None,
                         cells=mask_patch,
                         image=img_patch,
-                        coords_path=np.array([cell_id, x, y]), #  None
-                        orion_format=True) # True False
+                        coords_path=None, #  None np.array([cell_id, x, y])
+                        orion_format=False) # True False
             
             cell_crops.append(cell_crop)
     
     print(f"{len(cell_crops)} cell crops loaded from Orion dataset.")
     
+    return cell_crops
+
+
+def load_sampled_cell_crops_from_orion(
+        cell_patches_path: str,
+        mask_name: str,
+        img_patch_name: str,
+        label_files,
+        sample_fraction=None,
+        max_samples=None,
+        sample_seed: int = 42) -> List[CellCrop]:
+    """
+    Fast optional Orion sampling path.
+
+    This samples metadata rows before constructing CellCrop objects, so debug runs
+    avoid materializing the full CRC sample and then copying a subset in Python.
+    """
+    label_files = sorted(label_files)
+    usecols = ["index_in_shard", "cellpose_id", "orion_label", "x", "y"]
+    sampled_frames = []
+    total_cells = 0
+
+    for label_file in label_files:
+        filename = os.path.basename(label_file)
+        file_id = filename.split('_')[1].split('.')[0]
+        labels_df = pd.read_csv(label_file, usecols=usecols)
+        labels_df = labels_df[labels_df['orion_label'] != 'Unassigned'].copy()
+        if labels_df.empty:
+            continue
+
+        labels_df["file_id"] = file_id
+        labels_df["row_index"] = np.arange(len(labels_df))
+        total_cells += len(labels_df)
+        sampled_frames.append(labels_df)
+
+    if not sampled_frames:
+        print("0 cell crops loaded from Orion dataset.")
+        return []
+
+    labels_df = pd.concat(sampled_frames, ignore_index=True)
+    if sample_fraction is not None:
+        sample_count = max(1, int(round(len(labels_df) * sample_fraction)))
+    else:
+        sample_count = int(max_samples)
+    sample_count = min(len(labels_df), sample_count)
+
+    labels_df = labels_df.sample(n=sample_count, random_state=sample_seed)
+    labels_df = labels_df.sort_values(["file_id", "row_index"])
+
+    cell_crops = []
+    for file_id, file_df in labels_df.groupby("file_id", sort=True):
+        images = np.load(f"{cell_patches_path}/{img_patch_name}_{file_id}.npy", mmap_mode="r")
+        masks = np.load(f"{cell_patches_path}/{mask_name}_{file_id}.npy", mmap_mode="r")
+
+        shard_indices = file_df['index_in_shard'].values
+        cell_ids = file_df['cellpose_id'].values
+        cell_labels = file_df['orion_label'].values
+        x_coords = file_df['x'].values
+        y_coords = file_df['y'].values
+        row_indices = file_df['row_index'].values
+
+        for i in np.arange(len(shard_indices)):
+            cell_id = cell_ids[i]
+            label = cell_labels[i]
+            int_label = get_multiclass_ct_name(label)
+            x = x_coords[i]
+            y = y_coords[i]
+
+            img_patch = np.asarray(images[shard_indices[i]]).copy()
+            mask_patch = np.asarray(masks[shard_indices[i]]).copy()
+
+            cell_crop = CellCrop(
+                cell_id=1,
+                image_id=f"{img_patch_name}_{file_id}_{row_indices[i]}",
+                label=int_label,
+                slices=None,
+                cells=mask_patch,
+                image=img_patch,
+                coords_path=None, # None np.array([cell_id, x, y])
+                orion_format=False, # False True
+            )
+
+            cell_crops.append(cell_crop)
+
+    print(f"{len(cell_crops)}/{total_cells} cell crops loaded from Orion dataset.")
     return cell_crops
 
 

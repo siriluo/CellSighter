@@ -23,15 +23,15 @@
     "epoch_max": 40,
     "lr": 1e-4,
     "proj_lr": 1e-4,
-    "batch_size": 2048,
+    "batch_size": 1024,
     "num_workers": 32,
     "weight_to_eval": "",
     "sample_batch": false,
     "to_pad": false,
     "hierarchy_match": {"0": "other cells", "1": "tumor cells"},
     "aug": true,
-    "save_dir": "./contrastive_classifier_checkpoints_orion_fold1_test2",
-    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_checkpoints_orion_fold1_test2/best_model.pth",
+    "save_dir": "./contrastive_classifier_checkpoints_orion_fold4_test1",
+    "ckpt_path": "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/contrastive_checkpoints_orion_fold4_test1/best_model.pth",
     "classifier": true,
     "graph": false
 }

@@ -310,7 +310,7 @@ class GraphDataConstructor:
         return edge_index, node_indices, edge_attr
     
     
-    def construct_knn_smoothing(self, dataloader, k=5, alpha=0.8):
+    def construct_knn_smoothing(self, dataloader, k=5, alpha=0.8, radius=None):
         # For now, just focus on 1 or 2 test samples:
         # ['CRC28' 'CRC26' 'CRC20' 'CRC13' 'CRC33_01' 'CRC27' 'CRC22']
         temp_one_sample_path = "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000/CRC33_01"
@@ -328,23 +328,72 @@ class GraphDataConstructor:
         # Use meta_data to get the coordinates and cells that correspond to the logits. Then use the coordinates to construct the knn graph. 
         # The node features will just be the logits.
         probs = torch.softmax(logits, dim=1)
-        
-        cell_ids_list = coords_list[:, 0] if coords_list is not None else None
-        coords = coords_list[:, 1:3].to(torch.float32) if coords_list is not None else None 
-        dist_mat = torch.cdist(coords, coords)
-        dist_mat.fill_diagonal_(float("inf"))
-        
-        # Only improve the radius
-        # only apply smoothing to cells if it has low probability.
-        
-        nn_idx = torch.topk(dist_mat, k=k, largest=False).indices
-        
-        # now perform smoothing for each cell.
-        mean_neighbor_probs = probs[nn_idx].mean(dim=1)
-        
-        smoothed_probs = alpha * probs + (1 - alpha) * mean_neighbor_probs
-        
-        
+
+        if coords_list is None or len(coords_list) == 0:
+            # No coordinates available -> no smoothing possible.
+            nn_idx = torch.full((probs.shape[0], 0), -1, dtype=torch.long)
+            return probs, nn_idx, logits, labels_list, coords_list, metadata
+
+        # Support both coordinate layouts:
+        # - [x, y]
+        # - [cell_id, x, y]
+        if coords_list.shape[1] >= 3:
+            coords = coords_list[:, 1:3].to(torch.float32)
+        elif coords_list.shape[1] == 2:
+            coords = coords_list[:, :2].to(torch.float32)
+        else:
+            raise ValueError(
+                f"coordinates must have at least 2 columns; got shape {tuple(coords_list.shape)}"
+            )
+        num_nodes = probs.shape[0]
+
+        # Keep a debug neighbor index tensor; -1 means "no neighbor".
+        nn_idx = torch.full((num_nodes, max(k, 0)), -1, dtype=torch.long)
+        smoothed_probs = probs.clone()
+
+        # Build KNN independently per image to avoid cross-slide leakage.
+        image_ids = [md["image_id"] for md in metadata]
+        unique_image_ids = list(dict.fromkeys(image_ids))
+
+        for image_id in unique_image_ids:
+            group_idx_list = [i for i, img in enumerate(image_ids) if img == image_id]
+            group_idx = torch.tensor(group_idx_list, dtype=torch.long)
+            n = group_idx.numel()
+
+            if n <= 1 or k <= 0:
+                # Nothing to smooth for singleton groups or k=0.
+                continue
+
+            group_coords = coords[group_idx]
+            group_probs = probs[group_idx]
+
+            dist_mat = torch.cdist(group_coords, group_coords)
+            dist_mat.fill_diagonal_(float("inf"))
+
+            k_eff = min(k, n - 1)
+            knn_dist, local_nn = torch.topk(dist_mat, k=k_eff, largest=False)
+            
+            radius_mask = (knn_dist <= radius) if radius is not None else None
+            
+            global_nn = group_idx[local_nn]
+
+            if radius is None:
+                mean_neighbor_probs = probs[global_nn].mean(dim=1)
+                smoothed_probs[group_idx] = alpha * group_probs + (1 - alpha) * mean_neighbor_probs
+            else:
+                for row_i in range(n):
+                    valid_neighbors = global_nn[row_i][radius_mask[row_i]]
+
+                    if valid_neighbors.numel() == 0:
+                        # No close neighbors, keep original probability.
+                        smoothed_probs[group_idx[row_i]] = probs[group_idx[row_i]]
+                        continue
+
+                    neighbor_mean = probs[valid_neighbors].mean(dim=0)
+                    smoothed_probs[group_idx[row_i]] = alpha * probs[group_idx[row_i]] + (1 - alpha) * neighbor_mean
+
+            nn_idx[group_idx, :k_eff] = global_nn
+
         return smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata
     
 
@@ -448,4 +497,3 @@ class GraphDataConstructor:
 
         
         return node_num_neighbors, avg_node_neighbors
-

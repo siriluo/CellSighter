@@ -63,6 +63,24 @@ def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classificat
     return model
 
 
+def load_encoder_checkpoint(model: nn.Module, checkpoint_path: str, device: torch.device) -> None:
+    """
+    Load contrastive encoder checkpoint into model, handling DataParallel 'module.' prefixes.
+    Expects checkpoint dict with key 'model_state_dict'.
+    """
+    ckpt = torch.load(checkpoint_path, map_location='cpu')
+    state_dict = ckpt['model_state_dict']
+
+    # Remove DataParallel prefix if present.
+    cleaned_state_dict = {}
+    for k, v in state_dict.items():
+        cleaned_state_dict[k.replace("module.", "")] = v
+
+    model.load_state_dict(cleaned_state_dict, strict=True)
+    model.to(device)
+    model.eval()
+
+
 def inside_eval(config, list_of_logits, list_of_labels, list_of_probs, num_classes):
     # list_of_logits = torch.tensor(list_of_logits).squeeze(1)
     # list_of_labels = torch.tensor(list_of_labels).squeeze(1)
@@ -390,7 +408,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # count
     print("Loading testing data...")
     test_crops = []
-    for sample in test_crc_samples:
+    for sample in test_crc_samples_single:
         filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
         crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
         test_crops.extend(crops)
@@ -490,6 +508,10 @@ def main(config_path: str, args=None):
         model_name=chosen_model
     )
 
+    if config.get("ckpt_path", None) is not None:
+        load_encoder_checkpoint(model, config["ckpt_path"], device)
+        print(f"Loaded encoder weights from checkpoint: {config['ckpt_path']}")
+
     if config.get('classifier', False):
         use_graph = config.get('graph', False)
         if not use_graph:
@@ -509,24 +531,24 @@ def main(config_path: str, args=None):
     print(f"Trainable parameters: {model_info['trainable_parameters']:,}")
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
-    # Calculate class weights for balanced training
-    if config.get('cifar', False) == False:
-        class_weights = calculate_class_weights(test_loader, config['num_classes'], device)
+    # # Calculate class weights for balanced training
+    # if config.get('cifar', False) == False:
+    #     class_weights = calculate_class_weights(test_loader, config['num_classes'], device)
     
-    # Create loss function with class weights
-    if not config.get('classifier', False):
-        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
-    else:
-        if config.get('cifar', False) == False:
-            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
-        else:
-            criterion = nn.CrossEntropyLoss()
+    # # Create loss function with class weights
+    # if not config.get('classifier', False):
+    #     criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
+    # else:
+    #     if config.get('cifar', False) == False:
+    #         criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+    #     else:
+    #         criterion = nn.CrossEntropyLoss()
     
-    # Create optimizer and scheduler
-    if not config.get('classifier', False):
-        optimizer, scheduler = create_optimizer_and_scheduler(model, config)
-    else:
-        optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
+    # # Create optimizer and scheduler
+    # if not config.get('classifier', False):
+    #     optimizer, scheduler = create_optimizer_and_scheduler(model, config)
+    # else:
+    #     optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
     
     # Create save directory
     save_dir = config.get('save_dir', './test_checkpoints')
@@ -540,7 +562,13 @@ def main(config_path: str, args=None):
     
     graph_evaluator = GraphDataConstructor(embedding_model=model, classifier=classifier, device=device)
     
-    smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata = graph_evaluator.construct_knn_smoothing(test_loader, k=5, alpha=1)
+    knn_k = config.get("knn_k", 5)
+    # alpha semantics in construct_knn_smoothing:
+    # alpha=1.0 -> no smoothing, alpha=0.0 -> full neighbor smoothing.
+    knn_alpha = config.get("knn_alpha", 0.6)
+    smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata = graph_evaluator.construct_knn_smoothing(
+        test_loader, k=knn_k, alpha=knn_alpha
+    )
     
     results = inside_eval(config=config, list_of_logits=logits, list_of_labels=labels_list, list_of_probs=smoothed_probs, num_classes=config['num_classes'])
     

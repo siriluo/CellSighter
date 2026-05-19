@@ -655,11 +655,14 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
             # for the xenium data, treat each cell image as just its own object, so only one cell per image.
             unique = np.unique(cells)
             num_unique_cells = len(unique)  # exclude background
-            objs = np.arange(1, num_unique_cells)  # cell ids start from 1
+            objs = np.arange(1, num_unique_cells-1)  # cell ids start from 1
         
-        if not testing:
-            # coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
-            coords_crc_path = f"/taiga/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed/{image_id}_cell_info.csv"
+        if coords_path is not None:
+            if not testing:
+                # coords_crc_path = f"/projects/illinois/vetmed/cb/kwang222/mz_jason/crc_ffpe_csvs/{image_id}_cell_info.csv" 
+                coords_crc_path = f"/taiga/illinois/vetmed/cb/kwang222/mz_jason/crc_coordinate_csv/removed/{image_id}_cell_info.csv"
+            else:
+                coords_crc_path = None
         else:
             coords_crc_path = None
 
@@ -672,7 +675,8 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
                 slices = None
 
             label = cl2lbl[cell_id]
-
+            # /taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/PanNuke/cellsighter_processing_stuff/CellTypes/cells/pannuke_f1_0.npz
+            # /taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/PanNuke/cellsighter_processing_stuff/CellTypes/cells2labels/pannuke_f1_0.npz
             crops.append(
                     CellCrop(cell_id=cell_id,
                             image_id=image_id,
