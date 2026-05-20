@@ -122,8 +122,8 @@ def load_cell_crops_from_orion(
                         slices=None,
                         cells=mask_patch,
                         image=img_patch,
-                        coords_path=None, #  None np.array([cell_id, x, y])
-                        orion_format=False) # True False
+                        coords_path=np.array([cell_id, x, y]), #  None np.array([cell_id, x, y])
+                        orion_format=True) # True False
             
             cell_crops.append(cell_crop)
     
