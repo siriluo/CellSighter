@@ -103,6 +103,7 @@ def load_cell_crops_from_orion(
         cell_labels = new_labels_df['orion_label'].values
         x_coords = new_labels_df['x'].values
         y_coords = new_labels_df['y'].values
+        sample_name = new_labels_df['case'].values[0]
         
         num_shards = len(shard_indices)
         
@@ -118,7 +119,7 @@ def load_cell_crops_from_orion(
             mask_patch = masks[shard_indices[i]]
             
             cell_crop = CellCrop(cell_id=1, # cell id should correspond to the integer in the mask, which should only be 1 for orion
-                        image_id=f"{sample_id}__{img_patch_name}_{file_id}_{i}",
+                        image_id=f"{sample_name}-{img_patch_name}_{file_id}_{i}",
                         label=int_label,
                         slices=None,
                         cells=mask_patch,
@@ -148,8 +149,7 @@ def load_sampled_cell_crops_from_orion(
     avoid materializing the full CRC sample and then copying a subset in Python.
     """
     label_files = sorted(label_files)
-    sample_id = os.path.basename(os.path.normpath(cell_patches_path))
-    usecols = ["index_in_shard", "cellpose_id", "orion_label", "x", "y"]
+    usecols = ["case", "index_in_shard", "cellpose_id", "orion_label", "x", "y"]
     sampled_frames = []
     total_cells = 0
 
@@ -191,6 +191,7 @@ def load_sampled_cell_crops_from_orion(
         x_coords = file_df['x'].values
         y_coords = file_df['y'].values
         row_indices = file_df['row_index'].values
+        sample_name = file_df['case'].values[0]
 
         for i in np.arange(len(shard_indices)):
             cell_id = cell_ids[i]
@@ -204,7 +205,7 @@ def load_sampled_cell_crops_from_orion(
 
             cell_crop = CellCrop(
                 cell_id=1,
-                image_id=f"{sample_id}__{img_patch_name}_{file_id}_{row_indices[i]}",
+                image_id=f"{sample_name}-{img_patch_name}_{file_id}_{row_indices[i]}",
                 label=int_label,
                 slices=None,
                 cells=mask_patch,
@@ -262,6 +263,7 @@ def load_cell_crops_from_orion_with_cellid(cell_patches_path: str, mask_name: st
     cell_labels = new_labels_df['orion_label'].values
     x_coords = new_labels_df['x'].values
     y_coords = new_labels_df['y'].values
+    sample_name = new_labels_df['case'].values[0]
     
     num_shards = len(shard_indices)
     
@@ -279,7 +281,7 @@ def load_cell_crops_from_orion_with_cellid(cell_patches_path: str, mask_name: st
         coords = [cell_id, x, y]
         
         cell_crop = CellCrop(cell_id=1, # use the actual cell id from orion
-                    image_id=f"{sample_id}__{img_patch_name}_{file_id}_{i}",
+                    image_id=f"{sample_name}_{img_patch_name}_{file_id}_{i}",
                     label=int_label,
                     slices=None,
                     cells=mask_patch,

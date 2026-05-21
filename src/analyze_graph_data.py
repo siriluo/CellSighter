@@ -566,7 +566,7 @@ def main(config_path: str, args=None):
     knn_k = config.get("knn_k", 5)
     # alpha semantics in construct_knn_smoothing:
     # alpha=1.0 -> no smoothing, alpha=0.0 -> full neighbor smoothing.
-    knn_alpha = config.get("knn_alpha", 0.8)
+    knn_alpha = config.get("knn_alpha", 0.7)
     smoothed_probs, nn_idx, logits, labels_list, coords_list, metadata = graph_evaluator.construct_knn_smoothing(
         test_loader, k=knn_k, alpha=knn_alpha
     )
