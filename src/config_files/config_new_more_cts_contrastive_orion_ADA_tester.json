@@ -34,6 +34,8 @@
     "domain_lambda": 0.5,
     "domain_loss_weight": 0.1,
     "domain_warmup_epochs": 5,
+    "source_domain_grad": false,
+    "target_domain_grad": true,
     "domain_hidden_dim": 256,
     "domain_dropout": 0.3,
     "target_batch_size": 512,

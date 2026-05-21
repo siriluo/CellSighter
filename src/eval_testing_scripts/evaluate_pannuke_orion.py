@@ -19,14 +19,14 @@ from sklearn.metrics import (
 )
 from torch.utils.data import DataLoader
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_DIR = REPO_ROOT / "src"
+SRC_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = SRC_DIR.parent
 sys.path.insert(0, str(SRC_DIR))
 
 from contrastive_learn_add import ClassificationHead, ContrastiveModel
 from data.data import CellCropsDataset
 from data.orion_data_processing import load_cell_crops_from_orion
-from data.utils import create_validation_transform, load_samples
+from data.utils import create_validation_transform, load_samples, pr_auc_score, topk_accuracy
 
 
 MODEL_DIMS = {
@@ -49,6 +49,19 @@ ORION_LABEL_TO_ID = {
     "Tumor": 7,
     "Vasculature": 8,
     "Granulocyte": 9,
+}
+
+ORION_CLASS_NAMES = {
+    0: "CD4+ T",
+    1: "CD8+ T",
+    2: "Treg",
+    3: "B cells",
+    4: "Monocytes / Macrophages",
+    5: "Stromal Cells",
+    6: "Smooth Muscle",
+    7: "Tumor Cells",
+    8: "Vasculature",
+    9: "Granulocytes",
 }
 
 ORION_10_TO_BROAD = {
@@ -107,7 +120,7 @@ def parse_args():
     parser.add_argument("--orion-sample-fraction", type=float, default=None, help="Optional Orion cell sample fraction.")
     parser.add_argument("--orion-max-samples", type=int, default=None, help="Optional Orion max cells per CRC sample.")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--num-classes", type=int, default=2)
+    parser.add_argument("--num-classes", type=int, default=10, help="Number of classifier output classes.")
     parser.add_argument("--crop-input-size", type=int, default=64)
     parser.add_argument("--crop-size", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -231,15 +244,15 @@ def discover_orion_samples(root, val_fold, seed):
     return splits[val_fold].tolist()
 
 
-def create_orion_data_loaders():
+def build_orion_loader(args):
     """
-    Create training and validation data loaders.
+    Create testing data loader.
     
     Args:
-        config: Configuration dictionary
+        args: Configuration dictionary
         
     Returns:
-        Tuple of (train_loader, val_loader)
+        test_loader
     """
     # In this case, we can get the image names by looping through the files instead for our situation: 
     cell_patches_path = "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000"
@@ -328,18 +341,31 @@ def aggregate_probs(probs, output_map, eval_num_classes):
     return aggregated
 
 
+def class_names_for(label_space, num_classes):
+    if label_space == "pannuke_three":
+        return [BROAD_CLASS_NAMES[i] for i in range(num_classes)]
+    if label_space == "orion_native":
+        return [ORION_CLASS_NAMES.get(i, str(i)) for i in range(num_classes)]
+    if num_classes == 2:
+        return ["Non-tumor", "Tumor"]
+    return [str(i) for i in range(num_classes)]
+
+
 def evaluate_loader(
         model,
         classifier,
         loader,
         device,
         eval_num_classes,
+        label_space,
         binary_positive_label=None,
         label_map=None,
-        output_map=None):
+        output_map=None,
+        valid_labels=None):
     all_labels = []
     all_preds = []
     all_probs = []
+    all_logits = []
 
     with torch.no_grad():
         for batch in loader:
@@ -354,14 +380,25 @@ def evaluate_loader(
                 labels = map_labels(labels, label_map)
 
             eval_probs = aggregate_probs(probs, output_map, eval_num_classes)
+            if valid_labels is not None:
+                valid_mask = torch.zeros_like(labels, dtype=torch.bool)
+                for valid_label in valid_labels:
+                    valid_mask |= labels == valid_label
+                labels = labels[valid_mask]
+                eval_probs = eval_probs[valid_mask]
+                logits = logits[valid_mask]
+
             preds = eval_probs.argmax(dim=1)
             all_labels.extend(labels.cpu().numpy().tolist())
             all_preds.extend(preds.cpu().numpy().tolist())
             all_probs.extend(eval_probs.cpu().numpy().tolist())
+            all_logits.extend(eval_probs.cpu().numpy().tolist())
 
     labels_np = np.asarray(all_labels)
     preds_np = np.asarray(all_preds)
     probs_np = np.asarray(all_probs)
+    logits_tensor = torch.tensor(all_logits)
+    labels_tensor = torch.tensor(all_labels)
     average = "binary" if eval_num_classes == 2 else "weighted"
     precision, recall, f1, support = precision_recall_fscore_support(
         labels_np, preds_np, average=None, zero_division=0
@@ -373,14 +410,20 @@ def evaluate_loader(
     try:
         if eval_num_classes == 2:
             auc = roc_auc_score(labels_np, probs_np[:, 1])
+            pr_auc = pr_auc_score(labels_np, probs_np, labels=np.arange(eval_num_classes), average="weighted")
         else:
-            auc = roc_auc_score(labels_np, probs_np, multi_class="ovr", average="weighted")
+            auc = roc_auc_score(labels_np, probs_np, multi_class="ovo", average="weighted")
+            multi_aucs = roc_auc_score(labels_np, probs_np, multi_class="ovr", average=None)
+            pr_auc = pr_auc_score(labels_np, probs_np, labels=np.arange(eval_num_classes), average="weighted")
+            multi_pr_aucs = pr_auc_score(labels_np, probs_np, labels=np.arange(eval_num_classes), average=None)
     except ValueError:
         auc = 0.0
+        pr_auc = 0.0
+        multi_aucs = []
+        multi_pr_aucs = []
 
-    return {
+    results = {
         "num_samples": int(labels_np.shape[0]),
-        "class_names": [BROAD_CLASS_NAMES.get(i, str(i)) for i in range(eval_num_classes)],
         "accuracy": float(accuracy_score(labels_np, preds_np)),
         "precision_per_class": precision.tolist(),
         "recall_per_class": recall.tolist(),
@@ -390,8 +433,20 @@ def evaluate_loader(
         "recall_avg": float(recall_avg),
         "f1_avg": float(f1_avg),
         "auc": float(auc),
+        "pr_auc": float(pr_auc),
         "confusion_matrix": confusion_matrix(labels_np, preds_np).tolist(),
+        "class_names": class_names_for(label_space, eval_num_classes),
+        "loss": 0.0,
+        "topk_accs": topk_accuracy(logits_tensor, labels_tensor, ks=[1, 3, 5]),
     }
+
+    if eval_num_classes > 2:
+        results.update({
+            "multi_class_aucs": multi_aucs.tolist() if hasattr(multi_aucs, "tolist") else multi_aucs,
+            "multi_class_pr_aucs": multi_pr_aucs.tolist() if hasattr(multi_pr_aucs, "tolist") else multi_pr_aucs,
+        })
+
+    return results
 
 
 def main():
@@ -406,23 +461,23 @@ def main():
     pannuke_loader = build_pannuke_loader(args)
     orion_loader = build_orion_loader(args)
 
+    pannuke_eval_num_classes = args.num_classes
     pannuke_positive = None
-    orion_positive = None
     pannuke_label_map = None
-    orion_label_map = None
-    output_map = None
-    eval_num_classes = args.num_classes
+    pannuke_output_map = None
+    pannuke_valid_labels = None
 
     if args.eval_label_space == "binary":
-        eval_num_classes = 2
+        pannuke_eval_num_classes = 2
         pannuke_positive = args.pannuke_positive_label
-        orion_positive = args.orion_positive_label
     elif args.eval_label_space == "three":
-        eval_num_classes = 3
+        if args.num_classes not in (3, 10):
+            raise ValueError("PanNuke 3-class evaluation requires a classifier with 3 or 10 output classes.")
+        pannuke_eval_num_classes = 3
         pannuke_label_map = PANNUKE_TO_BROAD
-        orion_label_map = ORION_10_TO_BROAD
+        pannuke_valid_labels = set(PANNUKE_TO_BROAD.values())
         if args.num_classes == 10:
-            output_map = ORION_10_TO_BROAD
+            pannuke_output_map = ORION_10_TO_BROAD
 
     results = {
         "pannuke_fold": evaluate_loader(
@@ -430,20 +485,20 @@ def main():
             classifier,
             pannuke_loader,
             device,
-            eval_num_classes,
+            pannuke_eval_num_classes,
+            "pannuke_three" if args.eval_label_space == "three" else args.eval_label_space,
             binary_positive_label=pannuke_positive,
             label_map=pannuke_label_map,
-            output_map=output_map,
+            output_map=pannuke_output_map,
+            valid_labels=pannuke_valid_labels,
         ),
         "orion_test": evaluate_loader(
             model,
             classifier,
             orion_loader,
             device,
-            eval_num_classes,
-            binary_positive_label=orion_positive,
-            label_map=orion_label_map,
-            output_map=output_map,
+            args.num_classes,
+            "orion_native",
         ),
     }
 

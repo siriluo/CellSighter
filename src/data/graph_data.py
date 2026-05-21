@@ -351,12 +351,30 @@ class GraphDataConstructor:
         nn_idx = torch.full((num_nodes, max(k, 0)), -1, dtype=torch.long)
         smoothed_probs = probs.clone()
 
-        # Build KNN independently per image to avoid cross-slide leakage.
-        image_ids = [md["image_id"] for md in metadata]
-        unique_image_ids = list(dict.fromkeys(image_ids))
+        # Build KNN independently per image/group to avoid cross-slide leakage.
+        # Orion samples often use image_id like "image_patches_<file_id>_<cellrow>".
+        # In that case, grouping directly by image_id makes each group size 1,
+        # which disables smoothing. Group by the parent "<image_patches_<file_id>>"
+        # when possible, while leaving non-Orion IDs unchanged.
+        def _smoothing_group_id(image_id):
+            s = str(image_id)
+            # Orion convention (added in loader): "<CRC_SAMPLE>__image_patches_<file_id>_<row>"
+            # Smooth per CRC sample folder.
+            if "__" in s:
+                maybe_sample = s.split("__", 1)[0]
+                if maybe_sample.startswith("CRC"):
+                    return maybe_sample
+            if s.startswith("image_patches_"):
+                head, sep, tail = s.rpartition("_")
+                if sep and tail.isdigit():
+                    return head
+            return s
 
-        for image_id in unique_image_ids:
-            group_idx_list = [i for i, img in enumerate(image_ids) if img == image_id]
+        group_ids = [_smoothing_group_id(md["image_id"]) for md in metadata]
+        unique_group_ids = list(dict.fromkeys(group_ids))
+
+        for group_id in unique_group_ids:
+            group_idx_list = [i for i, gid in enumerate(group_ids) if gid == group_id]
             group_idx = torch.tensor(group_idx_list, dtype=torch.long)
             n = group_idx.numel()
 

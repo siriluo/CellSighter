@@ -62,6 +62,8 @@ class AdversarialContrastiveTrainer(ContrastiveTrainer):
         self.domain_loss_weight = adv_config.get("domain_loss_weight", 1.0)
         self.max_domain_lambda = adv_config.get("domain_lambda", 1.0)
         self.domain_warmup_epochs = adv_config.get("domain_warmup_epochs", 5)
+        self.source_domain_grad = adv_config.get("source_domain_grad", True)
+        self.target_domain_grad = adv_config.get("target_domain_grad", True)
         self.max_epochs = (config or {}).get("epoch_max", 100)
 
         self.history.update({
@@ -171,7 +173,9 @@ class AdversarialContrastiveTrainer(ContrastiveTrainer):
             source_projection = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
             supcon_loss = criterion(source_projection, source_labels)
 
-            domain_features = torch.cat([source_features, target_features], dim=0)
+            source_domain_features = source_features if self.source_domain_grad else source_features.detach()
+            target_domain_features = target_features if self.target_domain_grad else target_features.detach()
+            domain_features = torch.cat([source_domain_features, target_domain_features], dim=0)
             source_domain = torch.zeros(source_features.size(0), dtype=torch.long, device=self.device)
             target_domain = torch.ones(target_features.size(0), dtype=torch.long, device=self.device)
             domain_labels = torch.cat([source_domain, target_domain], dim=0)

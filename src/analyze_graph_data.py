@@ -84,7 +84,8 @@ def load_encoder_checkpoint(model: nn.Module, checkpoint_path: str, device: torc
 def inside_eval(config, list_of_logits, list_of_labels, list_of_probs, num_classes):
     # list_of_logits = torch.tensor(list_of_logits).squeeze(1)
     # list_of_labels = torch.tensor(list_of_labels).squeeze(1)
-    topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
+    # Use the post-KNN probabilities so top-k metrics reflect smoothing.
+    topk_accs = topk_accuracy(list_of_probs, list_of_labels, ks=[1, 3, 5])
     
     save_path = config.get('save_dir', './test_checkpoints')
     with open(f"{save_path}/topk_accs.json", 'w') as f:
