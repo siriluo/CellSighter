@@ -352,11 +352,12 @@ class GraphDataConstructor:
         smoothed_probs = probs.clone()
 
         # Build KNN independently per image to avoid cross-slide leakage.
-        image_ids = [md["image_id"] for md in metadata]
-        unique_image_ids = list(dict.fromkeys(image_ids))
+        group_ids = [md["image_id"].split("-")[0] for md in metadata]
+        # Extract sample/case from image_id
+        unique_group_ids = list(dict.fromkeys(group_ids))
 
-        for image_id in unique_image_ids:
-            group_idx_list = [i for i, img in enumerate(image_ids) if img == image_id]
+        for image_id in unique_group_ids:
+            group_idx_list = [i for i, img in enumerate(group_ids) if img == image_id]
             group_idx = torch.tensor(group_idx_list, dtype=torch.long)
             n = group_idx.numel()
 
