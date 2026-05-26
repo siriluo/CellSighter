@@ -69,6 +69,7 @@ src/data/test_graphs/
 src/data/test_outputs/
 src/*/list_of_labels.npz
 src/*/list_of_logits.npz
+src/results_graph_analysis/
 src/data/cifar_10/cifar-10-python.tar.gz
 src/data/cifar_10/cifar-10-batches-py/batches.meta
 src/data/cifar_10/cifar-10-batches-py/data_batch_1

@@ -223,7 +223,7 @@ def build_pannuke_loader(args):
         "to_pad": False,
         "crop_size": args.crop_size,
     }
-    crops = load_samples(config, image_ids, already_cropped=False, testing=True)
+    crops = load_samples(config, image_ids, already_cropped=True, testing=True)
     transform = create_validation_transform(crop_size=args.crop_input_size)
     dataset = CellCropsDataset(crops=crops, transform=transform, mask=True, contrastive=False)
     return DataLoader(

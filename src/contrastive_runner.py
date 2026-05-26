@@ -391,11 +391,20 @@ def create_adversarial_target_loader(config: Dict[str, Any], uni_transform=None)
         )
 
     use_xenium = target_config.get("xenium", False)
+    target_already_cropped = adv_config.get(
+        "target_already_cropped",
+        target_config.get("target_already_cropped", True),
+    )
+    target_testing = adv_config.get(
+        "target_testing",
+        target_config.get("target_testing", True),
+    )
+
     target_crops = load_samples(
         target_config,
         target_set,
-        already_cropped=True,
-        testing=True,
+        already_cropped=target_already_cropped,
+        testing=target_testing,
         coords_path=None,  # Ensure coords_path is None to avoid loading coordinates for target domain
     )
     if len(target_crops) == 0:

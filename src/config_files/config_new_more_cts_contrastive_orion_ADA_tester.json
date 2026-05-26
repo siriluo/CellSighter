@@ -6,7 +6,7 @@
   "train_set": [],
   "val_set": [],
   "num_classes": 10,
-  "epoch_max": 20,
+  "epoch_max": 25,
   "lr": 2e-4,
   "proj_lr": 2e-4,
   "batch_size": 512,
@@ -19,7 +19,7 @@
     "1": "tumor cells"
   },
   "aug": true,
-  "save_dir": "./contrastive_checkpoints_orion_to_pannuke_dann_sample10_test1",
+  "save_dir": "./contrastive_checkpoints_orion_to_pannuke_dann_sample10_test3",
   "ckpt_path": "",
   "classifier": false,
   "graph": false,
@@ -31,13 +31,20 @@
     "enabled": true,
     "target_root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/PanNuke/cellsighter_processing_stuff_2",
     "pannuke_folds": [1, 2],
-    "domain_lambda": 0.5,
-    "domain_loss_weight": 0.1,
+    "target_already_cropped": true,
+    "target_testing": true,
+
+    "domain_lambda": 0.25,
+    "domain_loss_weight": 0.05,
     "domain_warmup_epochs": 5,
+
+    "source_domain_grad": false,
+    "target_domain_grad": true,
+
     "domain_hidden_dim": 256,
     "domain_dropout": 0.3,
     "target_batch_size": 512,
     "target_num_workers": 8,
-    "target_drop_last": false
+    "target_drop_last": true
   }
 }
