@@ -77,6 +77,7 @@ def load_cell_crops_from_orion(
         )
 
     cell_crops = []
+    sample_id = os.path.basename(os.path.normpath(cell_patches_path))
      
     # Load labels
     # label_files = glob.glob(f"{cell_patches_path}/{labels_name}_*.csv")
@@ -236,6 +237,7 @@ def load_cell_crops_from_orion_with_cellid(cell_patches_path: str, mask_name: st
         List of CellCrop objects
     """
     cell_crops = []
+    sample_id = os.path.basename(os.path.normpath(cell_patches_path))
      
     filtered_cells_labels = "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/small_patch_label_overlays/CRC33_01_option2_patch_overlay_1500_filtered_by_patchcsv_cells.csv"
     orig_cells_labels = "meta_00000.csv"
