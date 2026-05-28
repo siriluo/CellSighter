@@ -250,48 +250,6 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     return test_loader
 
 
-# def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
-#     """
-#     Create training and validation data loaders.
-    
-#     Args:
-#         config: Configuration dictionary
-        
-#     Returns:
-#         Tuple of (train_loader, val_loader)
-#     """
-#     use_xenium = config.get("xenium", False)
-
-#     val_image_names = config['val_set'] 
-    
-#     print("Loading validation data...")
-#     val_crops = load_samples(config, val_image_names, already_cropped=use_xenium, testing=use_xenium)
-#     print(f"Loaded {len(val_crops)} validation samples")
-    
-#     # Create transforms
-#     val_transform = create_validation_transform(crop_size=config['crop_input_size'])
-    
-#     # Create datasets
-#     val_dataset = CellCropsDataset(
-#         crops=val_crops,
-#         transform=val_transform,
-#         mask=use_mask
-#     )
-    
-#     # Print dataset statistics
-#     print_dataset_stats(val_dataset, "Validation")
-    
-#     val_loader = DataLoader(
-#         val_dataset,
-#         batch_size=config['batch_size'], #  1
-#         shuffle=False,
-#         num_workers=config['num_workers'],
-#         pin_memory=True if torch.cuda.is_available() else False
-#     )
-    
-#     return train_loader, val_loader
-
-
 def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
@@ -334,7 +292,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
-    test_transform = create_test_transform(crop_size=config['crop_input_size'])
+    test_transform = create_validation_transform(crop_size=config['crop_input_size']) # create_test_transform
     
     # Create datasets
     test_dataset = CellCropsDataset(

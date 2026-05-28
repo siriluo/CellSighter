@@ -120,6 +120,11 @@ class SupConLoss(nn.Module):
         self.temperature = temperature
         self.contrast_mode = contrast_mode
         self.base_temperature = base_temperature
+        self._cached_batch_size = None
+        self._cached_anchor_count = None
+        self._cached_device = None
+        self._cached_logits_mask = None
+        self._cached_diag_idx = None
 
     def forward(self, features, labels, mask=None): # =None
         """Compute loss for model. If both `labels` and `mask` are None,
@@ -179,12 +184,30 @@ class SupConLoss(nn.Module):
         # tile mask
         mask = mask.repeat(anchor_count, contrast_count)
         # mask-out self-contrast cases
-        logits_mask = torch.scatter(
-            torch.ones_like(mask),
-            1,
-            torch.arange(batch_size * anchor_count).view(-1, 1).to(device),
-            0
-        )
+        if (
+            self._cached_logits_mask is None
+            or self._cached_batch_size != batch_size
+            or self._cached_anchor_count != anchor_count
+            or self._cached_device != device
+        ):
+            diag_idx = torch.arange(batch_size * anchor_count, device=device).view(-1, 1)
+            logits_mask = torch.scatter(
+                torch.ones(
+                    (batch_size * anchor_count, batch_size * contrast_count),
+                    device=device,
+                    dtype=mask.dtype,
+                ),
+                1,
+                diag_idx,
+                0,
+            )
+            self._cached_batch_size = batch_size
+            self._cached_anchor_count = anchor_count
+            self._cached_device = device
+            self._cached_diag_idx = diag_idx
+            self._cached_logits_mask = logits_mask
+        else:
+            logits_mask = self._cached_logits_mask
         mask = mask * logits_mask
 
         # compute log_prob
