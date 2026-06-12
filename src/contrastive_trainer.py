@@ -303,7 +303,7 @@ class ContrastiveTrainer:
                     m = batch.get('mask', None)
                     if m is not None:
                         images[0] = torch.cat([images[0], m[0]], dim=1)
-                        images[1] = torch.cat(set_to_none=True[images[1], m[1]], dim=1)
+                        images[1] = torch.cat([images[1], m[1]], dim=1)
                     
                 images = images #.to(self.device)
 

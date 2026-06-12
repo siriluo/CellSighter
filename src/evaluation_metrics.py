@@ -83,8 +83,11 @@ class ConClassEvaluator:
         self.classifier = classifier
         self.config = config
 
-        self.encoder_model, self.classifier, self.criterion = self.set_model(self.model, self.encoder_ckpt, classifier=self.classifier, criterion=self.criterion)
+        if not config.get("one_chkpt", False):
+            self.encoder_model, self.classifier, self.criterion = self.set_model(self.model, self.encoder_ckpt, classifier=self.classifier, criterion=self.criterion)
         # self.classifier = self.classifier.to(device)
+        else:
+            self.encoder_model = self.model
         
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)
@@ -257,6 +260,21 @@ class ConClassEvaluator:
         return model_to_load, classifier, criterion #
 
 
+    def label_mapping_pannuke(self, labels, label_map):
+        
+        mapped = labels.clone()
+        for source_label, target_label in label_map.items():
+            mapped[labels == source_label] = target_label
+            
+        # if valid_labels is not None:
+        #     valid_mask = torch.zeros_like(labels, dtype=torch.bool)
+        #     for valid_label in valid_labels:
+        #         valid_mask |= labels == valid_label
+        #     labels = labels[valid_mask]
+            
+        return mapped
+
+
     def evaluate_detailed(self, test_loader: Optional[DataLoader] = None) -> Dict[str, Any]:
         """
         Perform detailed evaluation with confusion matrix and class-wise metrics.
@@ -368,14 +386,39 @@ class ConClassEvaluator:
                 list_of_logits.append(output.cpu().numpy().tolist())
                 list_of_labels.append(labels.tolist())
         
-        # For the mapping, tumor cells are class 7 (index 7).
-        
+        # For the mapping, tumor cells are class 7 (index 7).        
         # Calculate metrics
         if self.config['batch_size'] > 1:
             list_of_logits = [item for sublist in list_of_logits for item in sublist]
             list_of_labels = [item for sublist in list_of_labels for item in sublist]
         list_of_logits = torch.tensor(list_of_logits) #.squeeze(1)
         list_of_labels = torch.tensor(list_of_labels) #.squeeze(1)
+        
+        all_probs = np.vstack(all_probs)
+        # if self.config.get("one_chkpt", False):
+        #     label_map = {
+        #         0: 0,  # Neoplastic
+        #         1: 1,  # Inflammatory
+        #         2: 2,  # Connective
+        #         4: 0,  # Epithelial
+        #     }
+        #     all_labels = np.array(all_labels)
+        #     all_preds = np.array(all_preds)
+        #     all_labels = self.label_mapping_pannuke(torch.tensor(all_labels), label_map).numpy()
+        #     list_of_labels = self.label_mapping_pannuke(list_of_labels, label_map) #.numpy()
+                        
+        #     pannuke_valid_labels = set(label_map.values())
+            
+        #     if pannuke_valid_labels is not None:
+        #         valid_mask = torch.zeros_like(torch.tensor(all_labels), dtype=torch.bool)
+        #         for valid_label in pannuke_valid_labels:
+        #             valid_mask |= torch.tensor(all_labels) == valid_label
+        #         all_labels = all_labels[valid_mask]
+        #         all_preds = all_preds[valid_mask]
+        #         all_probs = all_probs[valid_mask]
+        #         list_of_labels = list_of_labels[valid_mask]
+        #         list_of_logits = list_of_logits[valid_mask]
+        
         topk_accs = topk_accuracy(list_of_logits, list_of_labels, ks=[1, 3, 5])
         
         save_path = self.config.get('save_dir', './test_checkpoints')
@@ -431,14 +474,17 @@ class ConClassEvaluator:
                 if self.config.get("simpler_labels", False):
                     all_labels = all_orig_labels
                     
-                all_probs = np.vstack(all_probs)
-                
+                num_unique_labels = len(np.unique(all_labels))
+                num_unique_pred_labels = all_probs.shape[1]
+                print(f"Unique labels in true labels: {num_unique_labels}")
+                print(f"Number of predicted label columns: {num_unique_pred_labels}")
                 auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
                 multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
                 
                 pr_auc = pr_auc_score(all_labels, all_probs, average='weighted')
                 multi_pr_aucs = pr_auc_score(all_labels, all_probs, average=None)
-        except ValueError:
+        except ValueError as e:
+            print(e)
             auc = 0.0  # Handle case where only one class is present
             if self.num_classes > 2:
                 multi_aucs = []

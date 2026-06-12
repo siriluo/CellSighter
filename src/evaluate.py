@@ -250,6 +250,59 @@ def create_contrastive_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader,
     return test_loader
 
 
+def build_pannuke_ids(root, fold):
+    cells_dir = Path(root) / "CellTypes" / "cells"
+    ids = [
+        path.stem
+        for path in cells_dir.glob(f"pannuke_f{fold}_*.npz")
+    ]
+    return sorted(ids, key=lambda x: int(x.split("_")[-1]))
+
+
+def sample_ids(ids, fraction=None, max_count=None, seed=42):
+    if fraction is None and max_count is None:
+        return ids
+
+    if fraction is not None:
+        count = max(1, int(round(len(ids) * fraction)))
+    else:
+        count = int(max_count)
+
+    count = min(len(ids), count)
+    if count >= len(ids):
+        return ids
+
+    rng = np.random.default_rng(seed)
+    indices = sorted(rng.choice(len(ids), size=count, replace=False).tolist())
+    return [ids[i] for i in indices]
+
+
+def build_pannuke_loader(config: Dict[str, Any]):
+    image_ids = build_pannuke_ids(config["root_dir"], config["pannuke_fold"])
+    if not image_ids:
+        raise ValueError(f"No PanNuke files found for fold {config['pannuke_fold']} under {config['root_dir']}")
+    image_ids = sample_ids(image_ids) # , config.get("pannuke_image_fraction"), config.get("pannuke_max_images"), config.get("seed")
+    print(f"Evaluating {len(image_ids)} PanNuke fold {config['pannuke_fold']} images")
+
+    PANNUKE_TO_BROAD = {
+        0: 0,  # Neoplastic
+        1: 1,  # Inflammatory
+        2: 2,  # Connective
+        4: 0,  # Epithelial
+    }
+
+    crops = load_samples(config, image_ids, testing=True, label_map=PANNUKE_TO_BROAD) # , already_cropped=True
+    transform = create_validation_transform(crop_size=config["crop_input_size"])
+    dataset = CellCropsDataset(crops=crops, transform=transform, mask=True, contrastive=False)
+    return DataLoader(
+        dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        num_workers=config["num_workers"],
+        pin_memory=torch.cuda.is_available(),
+    )
+
+
 def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
@@ -276,6 +329,20 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     
     # Then split into folds based on this.
     test_crc_samples = folders_perm[32:len(folders)]
+    
+    train_val_samples = folders_perm[:32]
+
+    folds = 4
+    splits = np.split(train_val_samples, folds)
+
+    val_fold = 2  # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+    crc_samples = []
+    for i in range(folds):
+        if i != val_fold:
+            crc_samples.append(splits[i])
+    crc_samples = np.concatenate(crc_samples)
+
+    val_crc_samples = splits[val_fold]
 
     # The data is numbered 00000
     mask_name = "cell_masks"
@@ -285,7 +352,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # count
     print("Loading testing data...")
     test_crops = []
-    for sample in test_crc_samples:
+    for sample in val_crc_samples:
         filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
         crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
         test_crops.extend(crops)
@@ -317,6 +384,29 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     return test_loader
 
 
+def load_separate_statedicts(state_dict):
+    # Separate dictionaries and strip module prefixes
+    state_dict_new = state_dict['model_state_dict'] if 'model_state_dict' in state_dict else state_dict
+    dict_part1 = {}
+    dict_part2 = {}
+
+    for key, value in state_dict_new.items():
+        # print(key)
+        if key.startswith("encoder."):
+            # Strip 'feature_extractor.' prefix
+            new_key = key.split(".", maxsplit=1)[1]
+            # print(new_key)
+            dict_part1[new_key] = value
+        elif key.startswith("classifier."):
+            # Strip 'classifier.' prefix
+            new_key = key.split(".", maxsplit=1)[1] #.replace("classifier.", "")
+            dict_part2[new_key] = value
+
+    
+    # Load the filtered weights into the submodels
+    return dict_part1, dict_part2
+
+
 def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = None, args=None):
     """
     Main training function.
@@ -346,8 +436,12 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     # else:
     #     train_loader, val_loader, test_loader = set_loader(config)
     
+    # if not config.get("pannuke_fold", None):
+    #     test_loader = create_contrastive_data_loaders(config)
+    # el
     if not config.get("orion", False):
-        test_loader = create_contrastive_data_loaders(config)
+        # test_loader = create_contrastive_data_loaders(config)
+        test_loader = build_pannuke_loader(config)
     else:
         test_loader = create_orion_data_loaders(config)
         
@@ -400,8 +494,21 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
 
         if config["class_path"] is not None:
             state_dict = torch.load(config["class_path"], weights_only=False)
-            classifier.load_state_dict(state_dict['model_state_dict'])
-            print("Loaded classifier weights from checkpoint")
+                        
+            if not config.get("one_chkpt", False):
+                classifier.load_state_dict(state_dict['model_state_dict'])
+                print("Loaded classifier weights from checkpoint")
+
+    if config.get("one_chkpt", False):
+        encoder_state_dict, classifier_state_dict = load_separate_statedicts(state_dict)
+        if torch.cuda.is_available():
+            model.cuda()
+            classifier.cuda()
+        
+        model.encoder.load_state_dict(encoder_state_dict)
+        print("Loaded encoder weights from checkpoint")
+        classifier.load_state_dict(classifier_state_dict)
+        print("Loaded classifier weights from checkpoint")
 
     # Print model information
     model_info = get_model_info(model)
