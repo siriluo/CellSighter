@@ -289,6 +289,7 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
         )
     
     # Print dataset statistics
+    
     print_dataset_stats(train_dataset, "Training")
     print_dataset_stats(val_dataset, "Validation")
     
@@ -330,7 +331,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
             # sampler=torch.utils.data.RandomSampler(train_dataset, num_samples=len(train_dataset), replacement=True),
             shuffle=True,
             num_workers=config['num_workers'],
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
         )
 
         # cust_sampler = TwoStageBalancedSampler(train_dataset_labels, batch_size=config['batch_size'], balance_threshold=0.6)
@@ -346,7 +348,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
             batch_size=config['batch_size'],
             shuffle=False,
             num_workers=config['num_workers'],
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
         ) 
     
     val_loader = DataLoader(
@@ -354,7 +357,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
         batch_size=config['batch_size'], #  1
         shuffle=False,
         num_workers=config['num_workers'],
-        pin_memory=True if torch.cuda.is_available() else False
+        pin_memory=True if torch.cuda.is_available() else False,
+        persistent_workers=True
     )
     
     return train_loader, val_loader
@@ -440,6 +444,7 @@ def create_adversarial_target_loader(config: Dict[str, Any], uni_transform=None)
         num_workers=adv_config.get("target_num_workers", config["num_workers"]),
         pin_memory=True if torch.cuda.is_available() else False,
         drop_last=adv_config.get("target_drop_last", False),
+        persistent_workers=True
     )
 
 
@@ -611,14 +616,16 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
         batch_size=config['batch_size'],
         shuffle=True,
         num_workers=config['num_workers'],
-        pin_memory=True if torch.cuda.is_available() else False
+        pin_memory=True if torch.cuda.is_available() else False,
+        persistent_workers=True
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=config['batch_size'],  # 1
         shuffle=False,
         num_workers=config['num_workers'],
-        pin_memory=True if torch.cuda.is_available() else False
+        pin_memory=True if torch.cuda.is_available() else False,
+        persistent_workers=True
     )
 
     return train_loader, test_loader

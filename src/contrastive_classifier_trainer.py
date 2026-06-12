@@ -625,7 +625,8 @@ class ConClassTrainer:
                 
                 pr_auc = pr_auc_score(all_labels, all_probs, average='weighted')
                 multi_pr_aucs = pr_auc_score(all_labels, all_probs, average=None)
-        except ValueError:
+        except ValueError as e:
+            print(e)
             auc = 0.0  # Handle case where only one class is present
             if self.num_classes > 2:
                 multi_aucs = []

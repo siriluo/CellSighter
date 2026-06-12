@@ -25,6 +25,20 @@ print(len(filelist))
 #     print(file)
 
 
+def get_multiclass_ct_name_test(label):
+
+    new_mapping = {
+        "CD4_T": 0,
+        "CD8_T": 1,
+        "B_cell": 2,
+        "Granulocyte": 3,
+    }
+
+    class_name = new_mapping[label]
+
+    return class_name
+
+
 def get_multiclass_ct_name(label):
 
     new_mapping = {
@@ -43,6 +57,9 @@ def get_multiclass_ct_name(label):
     class_name = new_mapping[label]
 
     return class_name
+
+
+# Make a function for helping to make balanced sample loading for orion to increase contrastive learning effectiveness
 
 
 def load_cell_crops_from_orion(
@@ -95,8 +112,10 @@ def load_cell_crops_from_orion(
         # Load labels
         labels_df = pd.read_csv(label_file)
         # ignore rows with cell_type == Unassigned
+        cells_to_ignore = ["Unassigned", "Vasculature", "Tumor", "Smooth_Muscle", "Stromal", "Mono_Macro", "Treg"]
         new_labels_df = labels_df[labels_df['orion_label'] != 'Unassigned'] 
         # new_labels_df = new_labels_df[new_labels_df['orion_label'] != 'Granulocyte'] 
+        # new_labels_df = labels_df[~labels_df['orion_label'].isin(cells_to_ignore)].copy()
         
         shard_indices = new_labels_df['index_in_shard'].values
         cell_ids = new_labels_df['cellpose_id'].values
@@ -110,7 +129,7 @@ def load_cell_crops_from_orion(
         for i in np.arange(num_shards):
             cell_id = cell_ids[i]
             label = cell_labels[i]
-            int_label = get_multiclass_ct_name(label)
+            int_label = get_multiclass_ct_name(label) # get_multiclass_ct_name get_multiclass_ct_name_test
             x = x_coords[i]
             y = y_coords[i]
             
@@ -124,8 +143,8 @@ def load_cell_crops_from_orion(
                         slices=None,
                         cells=mask_patch,
                         image=img_patch,
-                        coords_path=np.array([cell_id, x, y]), #  None np.array([cell_id, x, y])
-                        orion_format=True) # True False
+                        coords_path=None, #  None np.array([cell_id, x, y])
+                        orion_format=False) # False True 
             
             cell_crops.append(cell_crop)
     

@@ -68,7 +68,7 @@ class CellCrop:
             result = {
                 'cell_id': self._cell_id,
                 'image_id': self._image_id,
-                'image': self._image[self._slices].astype(np.uint8) if self._slices is not None else self._image.astype(np.uint8), # .astype(np.float32)
+                'image': self._image[self._slices] if self._slices is not None else self._image, # .astype(np.float32)
                 'slice_x_start': self._slices[0].start if self._slices is not None else self._slices,
                 'slice_y_start': self._slices[1].start if self._slices is not None else self._slices,
                 'slice_x_end': self._slices[0].stop if self._slices is not None else self._slices,
@@ -79,7 +79,7 @@ class CellCrop:
             result = {
                 'cell_id': self._cell_id,
                 'image_id': self._image_id,
-                'image': self._image.astype(np.uint8), # .astype(np.float32)
+                'image': self._image, # .astype(np.float32)
                 'label': np.array(self._label, dtype=np.longlong),
             }
 
@@ -96,7 +96,7 @@ class CellCrop:
             result.update({
                 'mask': (cells_crop == self._cell_id).astype(np.float32),
                 'all_cells_mask': (cells_crop > 0).astype(np.float32),
-                'all_cells_mask_seperate': cells_crop.astype(np.float32)
+                # 'all_cells_mask_seperate': cells_crop.astype(np.float32)
             })
         
         return result
@@ -609,10 +609,14 @@ def create_slices(slices, crop_size, bounds):
     return tuple(new_slices)
 
 
-def load_samples(config, images_names, already_cropped: bool = False, testing: bool = False, coords_path = None) -> Tuple[List[CellCrop], List[List[int]]]:
+def load_samples(config, images_names, 
+                 already_cropped: bool = False, 
+                 testing: bool = False, 
+                 coords_path = None,
+                 label_map = None,
+                 ) -> Tuple[List[CellCrop], List[List[int]]]:
     """Load and process cell samples from images."""
     dataset_dir = os.path.join(config['root_dir'], "CellTypes")
-    # images_names = config['train_set'] # will be val_set if for validation
     
     image_dir =  os.path.join(dataset_dir, "data", "images")
     cells_dir =  os.path.join(dataset_dir, "cells")
@@ -651,6 +655,7 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
         # If the masks are already separated, no need to do it again:
         if not already_cropped:
             objs = ndimage.find_objects(cells)
+            print(len(objs))
         else:
             # for the xenium data, treat each cell image as just its own object, so only one cell per image.
             unique = np.unique(cells)
@@ -675,6 +680,14 @@ def load_samples(config, images_names, already_cropped: bool = False, testing: b
                 slices = None
 
             label = cl2lbl[cell_id]
+            
+            # label = int(cl2lbl[cell_id])
+
+            if label_map is not None:
+                if label not in label_map:
+                    continue
+                label = label_map[int(label)]
+            
             # /taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/PanNuke/cellsighter_processing_stuff/CellTypes/cells/pannuke_f1_0.npz
             # /taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/PanNuke/cellsighter_processing_stuff/CellTypes/cells2labels/pannuke_f1_0.npz
             crops.append(

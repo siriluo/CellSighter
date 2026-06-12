@@ -55,6 +55,7 @@ Thumbs.db
 results/
 checkpoints/
 experiment_results/
+conformal_prediction_outputs_fold4
 */list_of_labels.npz
 */list_of_logits.npz
 *.pth

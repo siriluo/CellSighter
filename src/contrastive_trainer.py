@@ -255,7 +255,7 @@ class ContrastiveTrainer:
             losses.update(loss.item(), bsz)
 
             # SGD
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
 

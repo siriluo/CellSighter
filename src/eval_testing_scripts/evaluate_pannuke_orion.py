@@ -479,6 +479,7 @@ def main():
         if args.num_classes == 10:
             pannuke_output_map = ORION_10_TO_BROAD
 
+
     results = {
         "pannuke_fold": evaluate_loader(
             model,
