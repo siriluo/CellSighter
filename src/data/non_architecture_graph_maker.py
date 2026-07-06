@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, OrderedDict
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -891,6 +891,136 @@ def plot_confusion_matrix_nature(
     return fig
 
 
+def plot_donut_chart(
+    class_counts,
+    class_names=None,
+    output_path="confusion_matrix",
+    version=1,
+    nested=False,
+    broad_class_names=None,
+    # normalize="true",  # "true", "pred", "all", or None
+    # annotate=True,
+):
+    
+    # Example data
+    labels = class_names
+    celltype_counts = class_counts
+
+    # Nature-style figure settings
+    mpl.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+        "font.size": 7,
+    })
+
+    celltype_colors = [
+        "#4E79A7",  # CD4_T
+        "#7BA7D7",  # CD8_T
+        "#2F5F8F",  # Treg
+        "#76B7B2",  # B_cell
+        "#59A14F",  # Mono_Macro
+        "#A0C86F",  # Granulocyte
+        "#C65413",  # Stromal
+        "#D78228",  # Smooth_Muscle
+        "#B07AA1",  # Tumor
+        "#DE6668",  # Vasculature
+    ]
+
+    mpl.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
+        "svg.fonttype": "none",
+        "pdf.fonttype": 42,
+        "font.size": 7,
+    })
+
+    values = np.array([celltype_counts[k] for k, label in enumerate(labels)])
+    colors = [celltype_colors[k] for k, label in enumerate(labels)]
+    
+    inner_counts = OrderedDict()
+    
+
+    fig, ax = plt.subplots(figsize=(3.0, 3.0))
+
+    wedges, _ = ax.pie(
+        values,
+        colors=colors,
+        startangle=90,
+        counterclock=False,
+        labels=None,
+        wedgeprops={
+            "width": 0.34,
+            "edgecolor": "white",
+            "linewidth": 2.0,
+        },
+    )
+
+    # Radial / orthogonal labels
+    label_radius = 1.22
+
+    for wedge, label, value in zip(wedges, labels, values):
+        angle = 0.5 * (wedge.theta1 + wedge.theta2)
+        angle = angle % 360
+        angle_rad = np.deg2rad(angle)
+
+        x = label_radius * np.cos(angle_rad)
+        y = label_radius * np.sin(angle_rad)
+
+        # Rotate labels radially, but keep left-side labels readable
+        rotation = angle
+        ha = "left"
+        if 90 < angle < 270:
+            rotation = angle + 180
+            ha = "right"
+
+        percent = value / values.sum() * 100
+
+        ax.text(
+            x,
+            y,
+            f"{label}", # \n{percent:.1f}%
+            ha=ha,
+            va="center",
+            rotation=rotation,
+            rotation_mode="anchor",
+            fontsize=6.5,
+        )
+
+        # Optional subtle leader line
+        line_start = 1.02
+        line_end = 1.14
+        ax.plot(
+            [line_start * np.cos(angle_rad), line_end * np.cos(angle_rad)],
+            [line_start * np.sin(angle_rad), line_end * np.sin(angle_rad)],
+            color="0.55",
+            lw=0.5,
+        )
+
+    ax.text(
+        0,
+        0,
+        f"n = {int(values.sum())}",
+        ha="center",
+        va="center",
+        fontsize=7,
+    )
+
+    ax.set(aspect="equal")
+    ax.set_xlim(-1.55, 1.55)
+    ax.set_ylim(-1.55, 1.55)
+    ax.axis("off")
+
+    fig.savefig(f"{output_path}/celltype_donut_radial_labels_{version}.svg", bbox_inches="tight")
+    fig.savefig(f"{output_path}/celltype_donut_radial_labels_{version}.pdf", bbox_inches="tight")
+    fig.savefig(f"{output_path}/celltype_donut_radial_labels_{version}.png", dpi=600, bbox_inches="tight")
+
+    plt.show()
+    
+    return fig
+
+
 def get_multiclass_ct_name(label):
 
     new_mapping = {
@@ -1022,24 +1152,35 @@ if __name__ == "__main__":
     config = load_config(config_path)
     print(f"Loaded configuration from {config_path}")
     
-    # orion_labels = create_orion_label_loader(config)
-    # class_names=[
-    #     "CD4+ T",
-    #     "CD8+ T",
-    #     "Treg",
-    #     "B cell",
-    #     "Mono/Macro",
-    #     "Stromal",
-    #     "Smooth Muscle",
-    #     "Tumor",
-    #     "Vasculature",
-    #     "Granulocyte"
-    # ]
-    class_names = [
+    orion_labels = create_orion_label_loader(config)
+    
+    label_counts = Counter(int(label) for label in orion_labels)
+    labels_sorted = np.array(sorted(label_counts), dtype=int)
+    counts = np.array([label_counts[label] for label in labels_sorted], dtype=float)
+    
+    class_names=[
         "CD4+ T",
         "CD8+ T",
+        "Treg",
         "B cell",
-        "Granulocyte"]
+        "Mono/Macro",
+        "Stromal",
+        "Smooth Muscle",
+        "Tumor",
+        "Vasculature",
+        "Granulocyte"
+    ]
+    
+    reordered_class_names = [0, 1, 2, 3, 4, 9, 5, 6, 7, 8]
+    class_names = [class_names[i] for i in reordered_class_names]
+    counts = [counts[i] for i in reordered_class_names]
+    
+    # class_names = [
+    #     "CD4+ T",
+    #     "CD8+ T",
+    #     "B cell",
+    #     "Granulocyte"]
+    
     # fig = dataset_figure(
     #     dataset_name="Orion Dataset",
     #     num_cells=len(orion_labels),
@@ -1066,6 +1207,26 @@ if __name__ == "__main__":
     # )
     output_path = "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/src/data/test_outputs/figures_testing"
     # fold_result_path = "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/experiment_results/evaluation_results/orion_fold_testing_results"
+    
+    # broad_class = {
+    #     "Tumor": "Tumor/Epithelial",
+    #     "CD4_T": "Lymphocytes",
+    #     "CD8_T": "Lymphocytes",
+    #     "Treg": "Lymphocytes",
+    #     "B_cell": "Lymphocytes",
+    #     "Mono_Macro": "Myeloid",
+    #     "Granulocyte": "Myeloid",
+    #     "Stromal": "Stromal/Mesenchymal",
+    #     "Smooth_Muscle": "Stromal/Mesenchymal",
+    #     "Vasculature": "Vasculature",
+    # }
+    
+    fig = plot_donut_chart(
+        class_counts=counts,
+        class_names=class_names,
+        output_path=output_path,
+        version=4
+    )
     
     # f1_vals = []
     # precision_vals = []
@@ -1131,20 +1292,20 @@ if __name__ == "__main__":
     #     cm = fold_results["confusion_matrix"]
     #     fold_cms.append(cm) 
         
-    single_cm_path = "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_4_class_testining/evaluation_results.json"
-    with open(single_cm_path, "r") as f:
-        fold_results = json.load(f)
-        # print(f"Fold {fold} results")
+    # single_cm_path = "/taiga/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_4_class_testining/evaluation_results.json"
+    # with open(single_cm_path, "r") as f:
+    #     fold_results = json.load(f)
+    #     # print(f"Fold {fold} results")
         
-    single_cm = fold_results["confusion_matrix"]
+    # single_cm = fold_results["confusion_matrix"]
         
-    # combined_cm = average_confusion_matrices(fold_cms, mode="sum")
-    fig = plot_confusion_matrix_nature(
-        confusion_matrix=single_cm, # combined_cm,
-        class_names=class_names,
-        output_path=f"{output_path}/4class_testing_confusion_matrix",
-        normalize="pred", # "true", "pred", "all", or None
-        annotate=True,
-    )
+    # # combined_cm = average_confusion_matrices(fold_cms, mode="sum")
+    # fig = plot_confusion_matrix_nature(
+    #     confusion_matrix=single_cm, # combined_cm,
+    #     class_names=class_names,
+    #     output_path=f"{output_path}/4class_testing_confusion_matrix",
+    #     normalize="pred", # "true", "pred", "all", or None
+    #     annotate=True,
+    # )
         
 

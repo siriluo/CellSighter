@@ -203,6 +203,8 @@ class ContrastiveTrainer:
         """one epoch training"""
         model.train()
         
+        if hasattr(model, "encoder") and hasattr(model.encoder, "rgb_encoder"):
+            model.encoder.rgb_encoder.eval()
 
         batch_time = AverageMeter()
         data_time = AverageMeter()
@@ -415,7 +417,7 @@ class ContrastiveTrainer:
                 epochs_without_improvement += 1
             
             # Save regular checkpoint
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 1 == 0:
                 self.save_checkpoint(epoch + 1, is_best=False)
             
             print('-' * 60)
@@ -493,7 +495,7 @@ class ContrastiveTrainer:
                 epochs_without_improvement += 1
             
             # Save regular checkpoint
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 1 == 0:
                 self.save_checkpoint(epoch + 1, is_best=False)
             
             # # Early stopping

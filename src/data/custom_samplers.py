@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import Sampler
 import numpy as np
+import math
 
 
 class BalancedLargeBatchSampler(Sampler):
@@ -256,5 +257,198 @@ class TwoStageBalancedSampler(Sampler):
     
 
 # Try and focus on cells from different slides when balancing the samples.
+class ClassAwareSupConBatchSampler(Sampler):
+    """
+    Class-aware batch sampler for supervised contrastive learning.
 
+    Each batch contains a fixed number of classes and a fixed number of samples
+    per class, guaranteeing same-class positives inside the batch. Rare classes
+    can be sampled with replacement.
+    """
+
+    def __init__(
+        self,
+        labels,
+        batch_size,
+        samples_per_class=64,
+        classes_per_batch=None,
+        oversample=True,
+        num_batches=None,
+        seed=42,
+        drop_incomplete=True,
+        fill=False,
+        fill_type="random",
+    ):
+        self.labels = np.asarray(labels, dtype=np.int64)
+        self.batch_size = int(batch_size)
+        self.samples_per_class = int(samples_per_class)
+        self.oversample = bool(oversample)
+        self.seed = int(seed)
+        self.drop_incomplete = bool(drop_incomplete)
+        self.epoch = 0
+        self.will_fill = fill
+        self.fill_type = fill_type
+
+        self.classes = np.array(sorted(np.unique(self.labels).tolist()), dtype=np.int64)
+        self.num_classes = len(self.classes)
+
+        if classes_per_batch is None:
+            classes_per_batch = min(
+                self.num_classes,
+                max(1, self.batch_size // self.samples_per_class),
+            )
+
+        self.classes_per_batch = int(classes_per_batch)
+        if self.classes_per_batch > self.num_classes:
+            raise ValueError(
+                f"classes_per_batch={self.classes_per_batch} exceeds "
+                f"available classes={self.num_classes}."
+            )
+
+        self.actual_batch_size = self.classes_per_batch * self.samples_per_class
+        if self.actual_batch_size > self.batch_size:
+            raise ValueError(
+                f"classes_per_batch * samples_per_class = {self.actual_batch_size}, "
+                f"which exceeds batch_size={self.batch_size}."
+            )
+        self.remainder_size = 0
+        if self.will_fill:
+            self.remainder_size = self.batch_size - self.actual_batch_size
+
+        if self.remainder_size < 0:
+            raise ValueError(
+                f"Balanced core batch size={self.actual_batch_size} exceeds "
+                f"batch_size={self.batch_size}."
+            )
+
+        self.all_indices = np.arange(len(self.labels), dtype=np.int64)
+
+        self.class_indices = {}
+        for class_id in self.classes:
+            indices = np.where(self.labels == class_id)[0].astype(np.int64)
+            if len(indices) == 0:
+                raise ValueError(f"Class {class_id} has no samples.")
+            self.class_indices[int(class_id)] = indices
+        
+        class_counts = {
+            int(class_id): len(self.class_indices[int(class_id)])
+            for class_id in self.classes
+        }
+
+        if self.fill_type == "inverse_frequency":
+            weights = np.zeros(len(self.labels), dtype=np.float64)
+            for class_id, count in class_counts.items():
+                weights[self.labels == class_id] = 1.0 / count
+            self.fill_probs = weights / weights.sum()
+        else:
+            self.fill_probs = None
+
+        valid_fill_strategies = {"random", "inverse_frequency", "class_uniform"}
+        if self.fill_type not in valid_fill_strategies:
+            raise ValueError(
+                f"Unknown fill_strategy={self.fill_type}. "
+                f"Expected one of {sorted(valid_fill_strategies)}."
+            )
+
+        if num_batches is None:
+            num_batches = math.ceil(len(self.labels) / self.actual_batch_size)
+        self.num_batches = int(num_batches)
+
+        print("ClassAwareSupConBatchSampler initialized:")
+        print(f"  Classes: {self.classes.tolist()}")
+        print(f"  Classes per batch: {self.classes_per_batch}")
+        print(f"  Samples per class: {self.samples_per_class}")
+        print(f"  Actual batch size: {self.actual_batch_size}")
+        print(f"  Batches per epoch: {self.num_batches}")
+        print(f"  Oversample rare classes: {self.oversample}")
+        for class_id in self.classes:
+            print(f"  Class {int(class_id)}: {len(self.class_indices[int(class_id)])} samples")
+
+    def set_epoch(self, epoch):
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        rng = np.random.default_rng(self.seed + self.epoch)
+
+        class_order = self.classes.copy()
+        rng.shuffle(class_order)
+        class_cursor = 0
+
+        shuffled_by_class = {}
+        cursor_by_class = {}
+        for class_id in self.classes:
+            indices = self.class_indices[int(class_id)].copy()
+            rng.shuffle(indices)
+            shuffled_by_class[int(class_id)] = indices
+            cursor_by_class[int(class_id)] = 0
+
+        for _ in range(self.num_batches):
+            if class_cursor + self.classes_per_batch > len(class_order):
+                rng.shuffle(class_order)
+                class_cursor = 0
+
+            batch_classes = class_order[
+                class_cursor : class_cursor + self.classes_per_batch
+            ]
+            class_cursor += self.classes_per_batch
+
+            batch = []
+            for class_id in batch_classes:
+                class_id = int(class_id)
+                indices = shuffled_by_class[class_id]
+                cursor = cursor_by_class[class_id]
+                end = cursor + self.samples_per_class
+
+                if end <= len(indices):
+                    selected = indices[cursor:end]
+                    cursor_by_class[class_id] = end
+                elif self.oversample:
+                    needed = self.samples_per_class
+                    selected = rng.choice(indices, size=needed, replace=True)
+                    cursor_by_class[class_id] = len(indices)
+                else:
+                    selected = indices[cursor:]
+                    cursor_by_class[class_id] = len(indices)
+
+                batch.extend(selected.tolist())
+                if self.will_fill and self.remainder_size > 0:
+                    if self.fill_type == "random":
+                        fill = rng.choice(
+                            self.all_indices,
+                            size=self.remainder_size,
+                            replace=True,
+                        )
+
+                    elif self.fill_type == "inverse_frequency":
+                        fill = rng.choice(
+                            self.all_indices,
+                            size=self.remainder_size,
+                            replace=True,
+                            p=self.fill_probs,
+                        )
+
+                    elif self.fill_type == "class_uniform":
+                        fill = []
+                        fill_classes = rng.choice(
+                            self.classes,
+                            size=self.remainder_size,
+                            replace=True,
+                        )
+                        for fill_class in fill_classes:
+                            class_pool = self.class_indices[int(fill_class)]
+                            fill.append(int(rng.choice(class_pool)))
+                        fill = np.asarray(fill, dtype=np.int64)
+
+                    batch.extend(fill.tolist())
+
+            expected_batch_size = self.batch_size if self.will_fill else self.actual_batch_size
+
+            if len(batch) < expected_batch_size and self.drop_incomplete:
+                continue
+
+            rng.shuffle(batch)
+            yield [int(idx) for idx in batch]
+
+    def __len__(self):
+        return self.num_batches
 

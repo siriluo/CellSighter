@@ -352,7 +352,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     # count
     print("Loading testing data...")
     test_crops = []
-    for sample in val_crc_samples:
+    for sample in test_crc_samples:
         filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
         crops = load_cell_crops_from_orion(f"{cell_patches_path}/{sample}", mask_name, img_patch_name, labels_name, filelist)
         test_crops.extend(crops)

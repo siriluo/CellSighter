@@ -31,7 +31,7 @@ from data.utils import load_samples, create_training_transform, create_validatio
 from data.data import CellCropsDataset
 from data.orion_data_processing import load_cell_crops_from_orion
 from train import get_multiclass_ct_name, load_config, create_data_loaders, calculate_class_weights
-from data.custom_samplers import TwoStageBalancedSampler
+from data.custom_samplers import TwoStageBalancedSampler, ClassAwareSupConBatchSampler
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from domain_adaptation import DomainDiscriminator
 from util.utils import TwoCropTransform
@@ -94,7 +94,7 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         #         weight_decay=1e-4)
         # print("SGD with different LRs")
         optimizer = optim.Adam(
-            model.parameters(),
+            [p for p in model.parameters() if p.requires_grad],
             lr=config['lr'],
             weight_decay=config.get('weight_decay', 1e-4) #  1e-5
         )
@@ -476,7 +476,7 @@ def pannuke_image_sort_key(image_id: str):
         return image_id
 
 
-def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataLoader]:
+def create_orion_data_loaders(config: Dict[str, Any], uni_transform = None) -> Tuple[DataLoader, DataLoader]:
     """
     Create training and validation data loaders.
 
@@ -493,7 +493,6 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     np.random.seed(42)
 
     # First get the list of folders and shuffle them to ensure random distribution of samples across folds
-    # /taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000
     folders = glob.glob("CRC*", root_dir=cell_patches_path)
     perm_indices = np.random.permutation(len(folders))
 
@@ -509,7 +508,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
     folds = 4
     splits = np.split(train_val_samples, folds)
 
-    val_fold = 2  # fold1: 3, fold2: 0, fold3: 1, fold4: 2
+    val_fold = 3  # fold1: 3, fold2: 0, fold3: 1, fold4: 2
     crc_samples = []
     for i in range(folds):
         if i != val_fold:
@@ -549,8 +548,6 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
         training_crops.extend(crops)
         print(sample)
 
-    # maybe use the last 10 files for validation and the rest for training?
-
     test_crops = []
     for sample_idx, sample in enumerate(val_crc_samples):
         validation_filelist = glob.glob(f"{cell_patches_path}/{sample}/{labels_name}_*.csv")
@@ -561,8 +558,7 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
                                                sample_seed=sample_seed + 10000 + sample_idx)
         test_crops.extend(val_crops)
         print(sample)
-    # test_crops = load_cell_crops_from_orion(f"{cell_patches_path}/{val_crc_sample}", mask_name, img_patch_name, labels_name, validation_filelist)
-    # test_crops = load_samples(config, image_names, testing=True)
+
     print(f"Loaded {len(test_crops)} testing samples")
 
     # Create transforms
@@ -572,13 +568,14 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
             # crop_input_size crop_size potentially replace with config['crop_input_size']
             shift=config.get('shift', 5),
             mask=use_mask,
+            use_uni=config.get('use_uni', False), uni_transform=uni_transform
         )
         print("Using data augmentation for training")
     else:
-        train_transform = create_validation_transform(crop_size=config['crop_size'])
+        train_transform = create_validation_transform(crop_size=config['crop_size'], use_uni=config.get('use_uni', False), uni_transform=uni_transform)
         print("No data augmentation applied")
 
-    test_transform = create_validation_transform(crop_size=config['crop_input_size'])
+    test_transform = create_validation_transform(crop_size=config['crop_input_size'], use_uni=config.get('use_uni', False), uni_transform=uni_transform)
 
     # Create datasets
     if config['classifier']:
@@ -609,16 +606,46 @@ def create_orion_data_loaders(config: Dict[str, Any]) -> Tuple[DataLoader, DataL
         )
 
     # Create data loaders
-    use_graph = config.get('graph', False)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        shuffle=True,
-        num_workers=config['num_workers'],
-        pin_memory=True if torch.cuda.is_available() else False,
-        persistent_workers=True
+    sampling_cfg = config.get("batch_sampling", {})
+    use_class_aware_sampling = (
+        sampling_cfg.get("enabled", False)
+        and sampling_cfg.get("strategy", "class_aware_supcon") == "class_aware_supcon"
+        and not config["classifier"]
     )
+    
+    print(f"Using class-aware batch sampling: {use_class_aware_sampling}")
+    if use_class_aware_sampling:
+        print("Using class-aware batch sampling for SupCon training")
+        batch_sampler = ClassAwareSupConBatchSampler(
+            labels=train_dataset._labels,
+            batch_size=config["batch_size"],
+            samples_per_class=sampling_cfg.get("samples_per_class", 64),
+            classes_per_batch=sampling_cfg.get("classes_per_batch", config["num_classes"]),
+            oversample=sampling_cfg.get("oversample", True),
+            num_batches=sampling_cfg.get("num_batches", None),
+            seed=sampling_cfg.get("seed", 42),
+            drop_incomplete=sampling_cfg.get("drop_incomplete", True),
+        )
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_sampler=batch_sampler,
+            num_workers=config["num_workers"],
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True,
+        )
+    else: 
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['batch_size'],
+            shuffle=True,
+            num_workers=config['num_workers'],
+            pin_memory=True if torch.cuda.is_available() else False,
+            persistent_workers=True
+        )
+    
+    
     test_loader = DataLoader(
         test_dataset,
         batch_size=config['batch_size'],  # 1
@@ -671,8 +698,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         # 'num_classes': config['num_classes'],
     }
     if chosen_model == 'new_fused':
-        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14 uni2h
-        encoder_kwargs['freeze_backbone'] = False # True False
+        encoder_kwargs['backbone'] = 'uni2h' # resnet50 dinov2_vitb14 uni2h
+        encoder_kwargs['freeze_backbone'] = True # True False
         
     projection_head_kwargs = {
         'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
@@ -721,7 +748,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         if not config.get("orion", False):
             train_loader, val_loader = create_contrastive_data_loaders(config, uni_transform=uni_transform)
         else: 
-            train_loader, val_loader = create_orion_data_loaders(config)
+            train_loader, val_loader = create_orion_data_loaders(config, uni_transform=uni_transform)
         test_loader = None
     else:
         train_loader, val_loader, test_loader = set_loader(config)
@@ -751,7 +778,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
-            criterion = nn.CrossEntropyLoss() # weight=class_weights
+            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
         else:
             criterion = nn.CrossEntropyLoss()
     
