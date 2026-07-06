@@ -1,6 +1,8 @@
 # Data directories
 datasets/
 HIDEFACS/
+figures/
+scripts/
 
 # Python
 __pycache__/
