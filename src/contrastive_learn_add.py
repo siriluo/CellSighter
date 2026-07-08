@@ -328,6 +328,17 @@ class HEFusedContrastiveModel(nn.Module):
         # Optional classifier head for joint training/eval
         # self.classifier = nn.Linear(fusion_dim, 1)
 
+    def encode_rgb(self, x):
+        rgb = x[:, :3]
+        with torch.inference_mode():
+            return self.rgb_encoder(rgb)
+
+    def forward_from_rgb_features(self, rgb_feat, masks):
+        neighbor_mask = masks[:, 0:1]
+        center_mask = masks[:, 1:2]
+        mask_feat = self.mask_branch(center_mask, neighbor_mask)
+        return self.fusion(torch.cat([rgb_feat, mask_feat], dim=1))
+
     def forward(self, x, return_features=False):
         """
         rgb:           [B, 3, H, W]

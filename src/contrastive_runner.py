@@ -594,13 +594,13 @@ def create_orion_data_loaders(config: Dict[str, Any], uni_transform = None) -> T
     else:
         train_dataset = CellCropsDataset(
             crops=training_crops,
-            transform=TwoCropTransform(train_transform),
-            mask=use_mask,
+            transform=TwoCropTransform(train_transform), # train_transform, #
+            mask=use_mask, 
             contrastive=True,
         )
         test_dataset = CellCropsDataset(
             crops=test_crops,
-            transform=TwoCropTransform(test_transform),
+            transform=TwoCropTransform(test_transform), # test_transform, #
             mask=use_mask,
             contrastive=True,
         )

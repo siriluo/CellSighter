@@ -1,8 +1,8 @@
 {
     "crop_input_size": 128,
     "crop_size": 128,
-    "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/indepedent_test/crc_codex_better_masks",
-    "orion": false,
+    "root_dir": "/taiga/illinois/vetmed/cb/kwang222/mz_jason/orion_all_without_largest/_meta/cell_labeling/cell_patches_64_match5um_area50_3000",
+    "orion": true,
     "use_uni": true,
     "train_set": ["reg001_A", "reg002_A", "reg003_A", "reg004_A", "reg005_A", "reg006_A", "reg007_A", "reg008_A", "reg009_A", 
     "reg010_A", "reg011_A", "reg012_A", "reg013_A", "reg014_A", "reg015_A", "reg016_A", "reg017_A", "reg018_A", "reg019_A", 
