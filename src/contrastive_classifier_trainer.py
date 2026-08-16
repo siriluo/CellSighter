@@ -74,8 +74,10 @@ class ConClassTrainer:
         self.save_dir = save_dir
         self.log_interval = log_interval
         self.args = args
+        self.config = config or {}
         self.encoder_ckpt = encoder_ckpt_path
         self.classifier = classifier
+        self.train_encoder = bool(self.config.get("train_encoder_with_ce", False))
 
         self.encoder_model, self.classifier, self.criterion = self.set_model(self.model, self.encoder_ckpt, classifier=self.classifier, criterion=self.criterion)
         
@@ -149,6 +151,7 @@ class ConClassTrainer:
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.classifier.state_dict(),
+            'encoder_state_dict': self.encoder_model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'best_val_f1': self.best_val_f1,
             'best_val_acc': self.best_val_acc,
@@ -213,33 +216,44 @@ class ConClassTrainer:
 
         # classifier = LinearClassifier(name=opt.model, num_classes=opt.n_cls)
 
-        ckpt = torch.load(checkpoint_path, map_location='cpu')
-        state_dict = ckpt['model_state_dict'] 
+        state_dict = None
+        if checkpoint_path:
+            ckpt = torch.load(checkpoint_path, map_location='cpu')
+            state_dict = ckpt['model_state_dict']
 
         if torch.cuda.is_available():
             if torch.cuda.device_count() > 1:
                 model_to_load.encoder = torch.nn.DataParallel(model_to_load.encoder)
-            else:
-                new_state_dict = {}
-                for k, v in state_dict.items():
-                    k = k.replace("module.", "")
-                    new_state_dict[k] = v
-                state_dict = new_state_dict
             model_to_load = model_to_load.cuda()
             classifier = classifier.cuda()
             criterion = criterion.cuda()
             cudnn.benchmark = True
-
-            model_to_load.load_state_dict(state_dict)
         else:
-            raise NotImplementedError('This code requires GPU')
+            model_to_load = model_to_load.to(self.device)
+            classifier = classifier.to(self.device)
+            criterion = criterion.to(self.device)
+
+        if state_dict is not None:
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                k = k.replace("module.", "")
+                new_state_dict[k] = v
+            model_to_load.load_state_dict(new_state_dict)
+            print(f"Loaded encoder checkpoint from {checkpoint_path}")
+        else:
+            print("No encoder checkpoint provided; using current encoder weights.")
 
         return model_to_load, classifier, criterion #
 
 
     def train_epoch(self, train_loader, encoder_model, classifier, criterion, optimizer, epoch): # , opt
         """one epoch training"""
-        encoder_model.eval()
+        if self.train_encoder:
+            encoder_model.train()
+            if hasattr(encoder_model, "encoder") and hasattr(encoder_model.encoder, "rgb_encoder"):
+                encoder_model.encoder.rgb_encoder.eval()
+        else:
+            encoder_model.eval()
         classifier.train()
 
         batch_time = AverageMeter()
@@ -274,9 +288,13 @@ class ConClassTrainer:
             warmup_learning_rate(self.args, epoch, idx, len(train_loader), optimizer)
 
             # compute loss
-            with torch.no_grad():
+            if self.train_encoder:
                 features = encoder_model.encoder(images)
-            output = classifier(features.detach())
+                output = classifier(features)
+            else:
+                with torch.no_grad():
+                    features = encoder_model.encoder(images)
+                output = classifier(features.detach())
             loss = criterion(output, labels)
 
             # update metric
@@ -721,7 +739,6 @@ class ConClassTrainer:
             print(f"Training curves saved to {save_path}")
         
         plt.show()
-
 
 
 
