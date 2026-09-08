@@ -236,8 +236,12 @@ class ConClassEvaluator:
 
         # classifier = LinearClassifier(name=opt.model, num_classes=opt.n_cls)
 
-        ckpt = torch.load(checkpoint_path, map_location='cpu')
-        state_dict = ckpt['model_state_dict'] 
+        # ckpt = torch.load(checkpoint_path, map_location='cpu')
+        # state_dict = ckpt['model_state_dict'] 
+        state_dict = None
+        if checkpoint_path:
+            ckpt = torch.load(checkpoint_path, map_location="cpu")
+            state_dict = ckpt.get("model_state_dict", ckpt)
 
         if torch.cuda.is_available():
             if torch.cuda.device_count() > 1:
@@ -253,7 +257,8 @@ class ConClassEvaluator:
             criterion = criterion.cuda()
             cudnn.benchmark = True
             print(f"Loading model from {checkpoint_path}")
-            model_to_load.load_state_dict(state_dict)
+            if state_dict is not None:
+                model_to_load.load_state_dict(state_dict)
         else:
             raise NotImplementedError('This code requires GPU')
 

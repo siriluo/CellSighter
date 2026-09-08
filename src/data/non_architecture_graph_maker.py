@@ -872,7 +872,7 @@ def plot_confusion_matrix_nature(
                         text,
                         ha="center",
                         va="center",
-                        fontsize=3.2,
+                        fontsize=2.2,
                         color="white" if value > threshold else "#222222",
                     )
 
@@ -1221,12 +1221,12 @@ if __name__ == "__main__":
     #     "Vasculature": "Vasculature",
     # }
     
-    fig = plot_donut_chart(
-        class_counts=counts,
-        class_names=class_names,
-        output_path=output_path,
-        version=4
-    )
+    # fig = plot_donut_chart(
+    #     class_counts=counts,
+    #     class_names=class_names,
+    #     output_path=output_path,
+    #     version=4
+    # )
     
     # f1_vals = []
     # precision_vals = []

@@ -122,7 +122,7 @@ def plot_nature_bar(
         ax.set_yticks(idx)
         ax.set_yticklabels(cell_types)
         ax.set_xlabel(metric_name)
-        ax.set_ylabel("Cell type")
+        # ax.set_ylabel("Cell type")
         ax.set_xlim(*y_or_x_lim)
         ax.invert_yaxis()
         ax.grid(axis="x", linestyle="-", linewidth=0.4, alpha=0.22)
@@ -135,7 +135,7 @@ def plot_nature_bar(
         ax.set_xticks(idx)
         ax.set_xticklabels(cell_types, rotation=35, ha="right")
         ax.set_ylabel(metric_name)
-        ax.set_xlabel("Cell type")
+        # ax.set_xlabel("Cell type")
         ax.set_ylim(*y_or_x_lim)
         ax.grid(axis="y", linestyle="-", linewidth=0.4, alpha=0.22)
         ax.grid(axis="x", visible=False)
@@ -236,7 +236,7 @@ def plot_celltype_metric_bar(
     # Auto null baseline if not provided
     if null_scores is None and class_counts is not None:
         null_scores = _compute_null_scores(metric_name, class_counts, len(scores))
-
+    print(null_scores)
     null_vals = None if null_scores is None else np.array(null_scores, dtype=float)
     if null_vals is not None and len(null_vals) != len(scores):
         raise ValueError("null_scores must have same length as scores.")
@@ -252,13 +252,13 @@ def plot_celltype_metric_bar(
 
     # ---- Paper-style rcParams ----
     mpl.rcParams.update({
-        "font.family": "serif",
-        "font.serif": ["DejaVu Serif", "Times New Roman", "Times"],
+        # "font.family": "serif",
+        # "font.serif": ["DejaVu Serif", "Times New Roman", "Times"],
         "font.size": 10,
         "axes.labelsize": 11,
         "axes.titlesize": 12,
         "xtick.labelsize": 9,
-        "ytick.labelsize": 9,
+        "ytick.labelsize": 12,
         "axes.linewidth": 0.8,
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
@@ -275,15 +275,36 @@ def plot_celltype_metric_bar(
         fig, ax = plt.subplots(figsize=(fig_w, 4.3))
 
     # ---- Color policy: class-colored actual bars + single neutral null baseline ----
+    # cell_type_colors = {
+    #     "Tumor Cells": "#C73E3A",                         # muted red
+    #     "T / Treg cells": "#7B61A8",                      # muted purple
+    #     "B cells": "#3B6FB6",                             # professional blue
+    #     "Myeloid cells": "#D98C2B",                       # muted orange
+    #     "Stromal / Vascular / Smooth Muscle": "#4C9A5F", # muted green
+    # }
     cell_type_colors = {
-        "Tumor Cells": "#C73E3A",                         # muted red
-        "T / Treg cells": "#7B61A8",                      # muted purple
-        "B cells": "#3B6FB6",                             # professional blue
-        "Myeloid cells": "#D98C2B",                       # muted orange
-        "Stromal / Vascular / Smooth Muscle": "#4C9A5F", # muted green
+        "Tumor/Epithelial": "#C73E3A",                         # muted red
+        "Lymphocytes": "#7B61A8",                      # muted purple
+        "Myeloid": "#3B6FB6",                             # professional blue
+        "Stromal/Mesenchymal": "#D98C2B",                       # muted orange
+        "Vasculature": "#4C9A5F", # muted green
     }
+
+    # cell_type_colors = {
+    #     "CD4+ T": "#4E79A7",  # 
+    #     "CD8+ T": "#7BA7D7",  # CD8_T
+    #     "Treg": "#2F5F8F",  # Treg
+    #     "B cell": "#76B7B2",  # B_cell
+    #     "Mono/Macro": "#59A14F",  # Mono_Macro
+    #     "Granulocyte": "#A0C86F",  # Granulocyte
+    #     "Stromal": "#C65413",  # Stromal
+    #     "Smooth Muscle": "#D78228",  # Smooth_Muscle
+    #     "Tumor": "#B07AA1",  # Tumor
+    #     "Vasculature": "#DE6668",  # Vasculature
+    # }
+    
     fallback_actual = "#3B6FB6"
-    actual_colors = [cell_type_colors.get(str(ct), fallback_actual) for ct in cell_types]
+    actual_colors = "#4C72B0" # [cell_type_colors.get(str(ct), fallback_actual) for ct in cell_types]
 
     null_color = "#BFC3C9"
     edge_color = "#1F1F1F"
@@ -308,7 +329,7 @@ def plot_celltype_metric_bar(
             bars_null = ax.barh(
                 x + offset, null_vals,
                 color=null_color, edgecolor=edge_color,
-                linewidth=0.6, height=bar_w, hatch="//", label=null_label
+                linewidth=0.6, height=bar_w, label=null_label # , hatch="//"
             )
         else:
             bars_actual = ax.barh(
@@ -321,7 +342,7 @@ def plot_celltype_metric_bar(
         ax.set_yticks(x)
         ax.set_yticklabels(cell_types)
         ax.set_xlabel(metric_name)
-        ax.set_ylabel("Cell Type")
+        ax.set_ylabel("Cell Type", fontsize=14)
         ax.set_xlim(*ylim)
         ax.invert_yaxis()
         ax.grid(axis="x", linestyle=(0, (2, 2)), linewidth=0.6, alpha=0.45)
@@ -336,7 +357,7 @@ def plot_celltype_metric_bar(
             bars_null = ax.bar(
                 x + offset, null_vals,
                 color=null_color, edgecolor=edge_color,
-                linewidth=0.6, width=bar_w, hatch="//", label=null_label
+                linewidth=0.6, width=bar_w, label=null_label # , hatch="//"
             )
         else:
             bars_actual = ax.bar(
@@ -347,11 +368,11 @@ def plot_celltype_metric_bar(
             bars_null = None
 
         ax.set_xticks(x)
-        ax.set_xticklabels(cell_types, rotation=30, ha="right")
-        ax.set_ylabel(metric_name)
-        ax.set_xlabel("Cell Type")
+        ax.set_xticklabels(cell_types, rotation=30, ha="right", fontsize=12)
+        ax.set_ylabel(metric_name, fontsize=14)
+        # ax.set_xlabel("Cell Type", fontsize=14)
         ax.set_ylim(*ylim)
-        ax.grid(axis="y", linestyle=(0, (2, 2)), linewidth=0.6, alpha=0.45)
+        ax.grid(axis="y", visible=False) # linestyle=(0, (2, 2)), linewidth=0.6, alpha=0.45
         ax.grid(axis="x", visible=False)
 
     # Reference line (optional)
@@ -386,53 +407,160 @@ def plot_celltype_metric_bar(
                 for b, s in zip(bars_actual, scores):
                     ax.text(
                         s + 0.012 * span, b.get_y() + b.get_height() / 2, f"{s:.3f}",
-                        va="center", ha="left", fontsize=8, color="#222222"
+                        va="center", ha="left", fontsize=5, color="#222222"
                     )
             if annotate_null and bars_null is not None:
                 for b, s in zip(bars_null, null_vals):
                     ax.text(
                         s + 0.012 * span, b.get_y() + b.get_height() / 2, f"{s:.3f}",
-                        va="center", ha="left", fontsize=8, color="#444444"
+                        va="center", ha="left", fontsize=5, color="#444444"
                     )
         else:
             if annotate:
                 for b, s in zip(bars_actual, scores):
                     ax.text(
                         b.get_x() + b.get_width() / 2, s + 0.012 * span, f"{s:.3f}",
-                        va="bottom", ha="center", fontsize=8, color="#222222"
+                        va="bottom", ha="center", fontsize=5, color="#222222"
                     )
             if annotate_null and bars_null is not None:
                 for b, s in zip(bars_null, null_vals):
                     ax.text(
                         b.get_x() + b.get_width() / 2, s + 0.012 * span, f"{s:.3f}",
-                        va="bottom", ha="center", fontsize=8, color="#444444"
+                        va="bottom", ha="center", fontsize=5, color="#444444"
                     )
 
     fig.tight_layout()
-    fig.savefig(f"{output_stem}.pdf", dpi=600, bbox_inches="tight")
-    fig.savefig(f"{output_stem}.svg", dpi=600, bbox_inches="tight")
-    fig.savefig(f"{output_stem}.png", dpi=600, bbox_inches="tight")
+    # fig.savefig(f"figure_images/{output_stem}.pdf", dpi=600, bbox_inches="tight")
+    # fig.savefig(f"figure_images/{output_stem}.svg", dpi=600, bbox_inches="tight")
+    # fig.savefig(f"figure_images/{output_stem}.png", dpi=600, bbox_inches="tight")
     plt.close(fig)
 
-    print(f"Saved: {output_stem}.pdf, {output_stem}.svg, {output_stem}.png")
+    print(f"Saved: figure_images/{output_stem}.pdf, figure_images/{output_stem}.svg, figure_images/{output_stem}.png")
+
+
+def plot_overall_accuracy_vs_random_baseline(
+    accuracy,
+    random_baseline,
+    output_stem="overall_accuracy_vs_random_baseline",
+    model_label="Model",
+    baseline_label="Random baseline",
+    title=None,
+    ylim=(0.0, 1.0),
+    annotate=True,
+    single_column=True,
+):
+    """
+    Plot overall model accuracy against a manually supplied random baseline.
+
+    Parameters
+    ----------
+    accuracy : float
+        Overall model accuracy.
+    random_baseline : float
+        Overall random-baseline accuracy.
+    """
+    mpl.rcParams.update({
+        # "font.family": "serif",
+        # "font.serif": ["DejaVu Serif", "Times New Roman", "Times"],
+        "font.size": 10,
+        "axes.labelsize": 11,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 9,
+        "ytick.labelsize": 7,
+        "axes.linewidth": 0.8,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",
+    })
+
+    values = np.array([accuracy, random_baseline], dtype=float)
+    if np.any(~np.isfinite(values)):
+        raise ValueError("accuracy and random_baseline must be finite numbers.")
+
+    fig_w_mm = 64 if single_column else 90
+    fig, ax = plt.subplots(figsize=(fig_w_mm * MM_TO_INCH, 48 * MM_TO_INCH))
+
+    labels = [model_label, baseline_label]
+    colors = ["#4C78A8", "#BFC3C9"]
+    bars = ax.bar(
+        np.arange(2),
+        values,
+        width=0.58,
+        color=colors,
+        edgecolor="#333333",
+        linewidth=0.5,
+    )
+
+    ax.set_xticks(np.arange(2))
+    ax.set_xticklabels(labels, fontsize=6)
+    ax.set_ylabel("Overall accuracy", fontsize=9)
+    ax.set_ylim(*ylim)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    if title:
+        ax.set_title(title, pad=3)
+
+    if annotate:
+        span = ylim[1] - ylim[0]
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                value + 0.015 * span,
+                f"{value:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=6.5,
+                color="#222222",
+            )
+
+    # fig.tight_layout(pad=0.5)
+    # fig.savefig(f"figure_images/{output_stem}.pdf", dpi=600, bbox_inches="tight")
+    # fig.savefig(f"figure_images/{output_stem}.svg", dpi=600, bbox_inches="tight")
+    # fig.savefig(f"figure_images/{output_stem}.png", dpi=600, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved: {output_stem}.pdf/.svg/.png")
 
 
 if __name__ == "__main__":
     # -------- MANUAL INPUT --------
-    metric_name = "F1 Score"  # PR AUC or "F1 Score" ROC AUC  
-    cell_types = [
-        "Tumor Cells",
-        "T / Treg cells",
-        "B cells",
-        "Myeloid cells",
-        "Stromal / Vascular / Smooth Muscle",
+    metric_name = "PR AUC"  # PR AUC or "F1 Score" ROC AUC  Class-wise Accuracy
+    # cell_types = [
+    #     "Tumor Cells",
+    #     "T / Treg cells",
+    #     "B cells",
+    #     "Myeloid cells",
+    #     "Stromal / Vascular / Smooth Muscle",
+    # ]
+    
+    # cell_types = [
+    #     "Tumor/Epithelial",
+    #     "Lymphocytes",
+    #     "Myeloid",
+    #     "Stromal/Mesenchymal",
+    #     "Vasculature"
+    # ]
+    
+    cell_types=[
+        "CD4+ T",
+        "CD8+ T",
+        "Treg",
+        "B cell",
+        "Mono/Macro",
+        "Stromal",
+        "Smooth Muscle",
+        "Tumor",
+        "Vasculature",
+        "Granulocyte"
     ]
+    # cell_types = ["10 Cell Type Avg"]
+    
     # scores = [0.9789543020004792,
     #     0.8732201105633748,
     #     0.837799886030762,
     #     0.8686055892403939,
     #     0.8770346009146741]
-    scores = [0.8567, 0.6200, 0.1372, 0.3638, 0.7411]
+    # scores = [0.8567, 0.6200, 0.1372, 0.3638, 0.7411]
     # scores = [
     #     0.9279656832995415,
     #     0.6914809868196645,
@@ -440,34 +568,83 @@ if __name__ == "__main__":
     #     0.43547955921805903,
     #     0.832469449624032
     # ]
+    
+    
+    # PR AUC
+    # 10 cell type scores
+    # micro
+    # scores = [0.117980337, 0.148079096, 0.503294865, 0.215328212, 0.284291536, 0.513979079, 0.476767444, 0.940647384, 0.542936631, 0.183677838]
+    # macro
+    scores = [0.117980337, 0.148079096, 0.503294866, 0.215328212, 0.284291536, 0.513979079, 0.476767444, 0.940647384, 0.542936632, 0.183677838]
+    # 5 cell type scores
+    # scores = [0.940647384, 0.73866939, 0.419002214, 0.76399035, 0.542936632]
+    
+    # f1 score macro 
+    # 10 cell type
+    # scores = [0.00333, 0.1099, 0.5315, 0.1103, 0.3521, 0.4271, 0.4154, 0.8630, 0.4853, 0.0069]
+    # 5 cell type
+    # scores = [0.8631, 0.6746, 0.3918, 0.6253, 0.4771]
+    
+    # Accuracy
+    # mean 
+    # 10 cell type
+    # scores = [0.526]
+    # 5 cell type
+    # scores = [0.652]
+    # individual
+    # 10 cell type
+    # scores = [0.001744847354292734, 0.06773264712634883, 0.6966013952001153, 0.06901397963552428, 0.37781013973056066, 0.3735248040085194, 0.3621078074617663, 0.8629908173016995, 0.5718202365737127, 0.0035267729311825903]
+    # 5 cell type
+    # scores = [0.854138031329206, 0.7617518117621256, 0.32372585748950683, 0.561166949899581, 0.48793328243881934]
+
+    
+    
     errors = None # [0.010, 0.012, 0.015, 0.017, 0.013, 0.020]  # optional; set None to disable
 
     macro_avg = None # float(np.mean(scores))
     
-    class_counts = None # [601675, 658525, 107442, 243968, 1016519]  # optional; set None to disable auto null baseline
+    class_counts = [81353, 74053, 318268, 90332, 130357, 138766, 314296, 375161, 369068, 39986] # None # [601675, 658525, 107442, 243968, 1016519]  # optional; set None to disable auto null baseline
+    # class_counts = [375161, 564006, 170343, 453062, 369068]
     
     # null_scores_used = [0.2289, 0.2506, 0.0409, 0.0928, 0.3868] # PR AUC null baselines (prevalence) - computed from class counts
-    null_scores_used = [0.2135, 0.2224, 0.0679, 0.1268, 0.2637] # F1 Score null baselines (prevalence-matched random) - computed from class counts
+    # null_scores_used = [0.2135, 0.2224, 0.0679, 0.1268, 0.2637] # F1 Score null baselines (prevalence-matched random) - computed from class counts
     # null_scores_used = None # set to None to auto-compute null baselines from class_counts and metric_name
-
+    
+    # null_f1_10class = [0.03956178639506208, 0.050744109356905404, 0.2030631537779395, 0.0378247203719037, 0.07207235464605792, 0.07314186136277187, 0.13080401675816783, 0.2031141629331471, 0.1780799933669056, 0.009926518129265207]
+    # null_f1_5class = [0.2031, 0.3320, 0.0820, 0.2041, 0.1781]
+    # mean
+    # null_acc_10class = [0.14770880754548069]
+    # null_acc_5class = [0.2316918401609893]
+    # independent
+    # null_acc_10class = [0.045884434092034555, 0.049864336803648455, 0.20116410273159793, 0.03854768261380903, 0.07457393093045049, 0.07223302542205082, 0.13595143128201886, 0.19277417275302386, 0.17914964878786788, 0.009877702443392606]
+    # null_acc_5class = [0.19277951567599041, 0.33546649743385215, 0.08444162970487896, 0.2081745430557702, 0.17915468643060406]
+    
     plot_celltype_metric_bar(
         cell_types=cell_types,
         scores=scores,
         metric_name=metric_name,
         errors=errors,
-        class_counts=class_counts,           # auto-computes PR AUC null per class
-        null_scores=null_scores_used,                    # leave None to auto-compute
-        null_label="Random (Prevalence)",
+        class_counts=class_counts,           # auto-computes PR AUC null per class class_counts
+        null_scores=None,                    # leave None to auto-compute
+        null_label="Random",
         title=None, # f"{metric_name} for Individual Cell Types"
-        output_stem=f"{metric_name.lower().replace(' ', '_')}_celltype_bar_nref_null_notitle",
+        output_stem=f"{metric_name.lower().replace(' ', '_')}_celltype_bar_5class_fixednull_acc",
         sort_desc=True,
         ylim=(0.0, 1.0),
-        annotate=True,
-        annotate_null=True,
+        annotate=False,  # Nature often avoids on-bar numbers; keep False by default
+        annotate_null=False,  # Nature often avoids on-bar numbers; keep False by default
         horizontal=False,           # switch to True for many classes
         reference_line=macro_avg,
         reference_label="Mean",
     )
+    # plot_overall_accuracy_vs_random_baseline(
+    #     accuracy=0.652,
+    #     random_baseline=0.2316918401609893,
+    #     output_stem="orion_overall_accuracy_vs_random_5class",
+    #     model_label="Model (5 class)",
+    #     baseline_label="Random baseline",
+    #     annotate=False,
+    # )
     
     # cell_types=cell_types,
     # scores=scores,

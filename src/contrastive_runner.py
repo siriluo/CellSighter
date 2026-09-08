@@ -37,7 +37,7 @@ from domain_adaptation import DomainDiscriminator
 from util.utils import TwoCropTransform
 
 
-use_mask = True # False set to true if you want to include the mask info
+use_mask = False # False set to true if you want to include the mask info
 cifar = False
 
 model_dict = {
@@ -48,6 +48,13 @@ model_dict = {
     'convnextv2_tiny': 768,
     'new_fused': 512
 }
+
+def use_contrastive_learning(config: Dict[str, Any]) -> bool:
+    return config.get("contrastive", not config.get("classifier", False))
+
+
+def use_supervised_ce(config: Dict[str, Any], args=None) -> bool:
+    return config.get("classifier", False) or not use_contrastive_learning(config) or (args and args.classifier)
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
     model = ContrastiveModel(
@@ -262,6 +269,8 @@ def create_contrastive_data_loaders(config: Dict[str, Any], uni_transform=None) 
     
     # Create datasets
     if config['classifier']:
+    # single_view = use_supervised_ce(config)
+    # if single_view:
         train_dataset = CellCropsDataset(
             crops=train_crops,
             transform=train_transform,
@@ -579,6 +588,8 @@ def create_orion_data_loaders(config: Dict[str, Any], uni_transform = None) -> T
 
     # Create datasets
     if config['classifier']:
+    # single_view = use_supervised_ce(config)
+    # if single_view:
         train_dataset = CellCropsDataset(
             crops=training_crops,
             transform=train_transform,
@@ -692,14 +703,14 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Create model
     # create_contrastive_model
-    chosen_model = 'new_fused' # 'convnextv2_tiny' resnet34 resnet18 resnet50 new_fused
+    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet34 resnet18 resnet50 new_fused
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
     }
     if chosen_model == 'new_fused':
-        encoder_kwargs['backbone'] = 'uni2h' # resnet50 dinov2_vitb14 uni2h
-        encoder_kwargs['freeze_backbone'] = True # True False
+        encoder_kwargs['backbone'] = 'resnet50' # resnet50 dinov2_vitb14 uni2h
+        encoder_kwargs['freeze_backbone'] = False # True False
         
     projection_head_kwargs = {
         'feature_dims': (model_dict[chosen_model], 128), # resnet18 if resnet34   2048 512 ConvNeXtV2: 768 256
@@ -719,11 +730,20 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type='new_fused', # resnet
+        model_type='resnet', # resnet new_fused
         model_name=chosen_model
     )
 
-    if args.classifier:
+    supervised_ce = use_supervised_ce(config, args)
+    if config["classifier"]:
+        # config["classifier"] = True
+        args.classifier = True
+        print("using classifier")
+    if supervised_ce:
+        config["train_encoder_with_ce"] = config.get("train_encoder_with_ce", not config.get("classifier", False))
+
+    # if args.classifier:
+    if supervised_ce:
         use_graph = config.get('graph', False)
         if not use_graph:
             classifier = ClassificationHead(**classification_head_kwargs)
@@ -732,7 +752,6 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             classifier = GATv2ClassificationHead(**classification_head_kwargs)
         # state_dict = torch.load('/projects/illinois/vetmed/cb/kwang222/cellsighter_testing/shirui_code/CellSighter/results_conclass_mask_test_aug/best_model.pth')
         # classifier.load_state_dict(state_dict['model_state_dict'])
-        # print("Loaded classifier weights from checkpoint")
 
     # Print model information
     model_info = get_model_info(model)
@@ -741,10 +760,10 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Trainable parameters: {model_info['trainable_parameters']:,}")
     print(f"Model size: {model_info['model_size_mb']:.2f} MB")
     
-    uni_transform = model.encoder.uni_transform
+    uni_transform = None #  model.encoder.uni_transform
     
     # Create data loaders
-    if (not args.cifar) or (not args.classifier):
+    if (not args.cifar) or (not config["classifier"]):
         if not config.get("orion", False):
             train_loader, val_loader = create_contrastive_data_loaders(config, uni_transform=uni_transform)
         else: 
@@ -756,7 +775,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     use_adversarial = config.get("adversarial", {}).get("enabled", False)
     target_loader = None
     if use_adversarial:
-        if args.classifier:
+        if config["classifier"]:
             raise ValueError("Adversarial adaptation is currently implemented for SupCon encoder training only.")
         if args.cifar:
             raise ValueError("Adversarial adaptation is intended for H&E cell crops, not the CIFAR debug path.")
@@ -768,13 +787,13 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     # Class weights are only used for classifier CE training; computing them
     # iterates the whole loader and is very slow for Orion SupCon/ADA debug runs.
     class_weights = None
-    if args.classifier and args.cifar == False:
-        class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
+    # if config["classifier"] and args.cifar == False:
+    #     class_weights = calculate_class_weights(train_loader, config['num_classes'], device)
     
     # Create loss function with class weights
     # 0.1 or 0.07 seems to perform best?
     # and try switching back to resnet50
-    if not args.classifier:
+    if not config["classifier"]:
         criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
         if args.cifar == False:
@@ -801,10 +820,23 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             optimizer, T_max=config.get("epoch_max", 100), eta_min=1e-6
         )
         print("Adam with domain discriminator")
-    elif not args.classifier:
+    elif not supervised_ce:
         optimizer, scheduler = create_optimizer_and_scheduler(model, config)
     else:
         optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
+        if config.get("train_encoder_with_ce", False):
+            params = list(model.parameters()) + list(classifier.parameters())
+            optimizer = optim.Adam(
+                [p for p in params if p.requires_grad],
+                lr=config["lr"],
+                weight_decay=config.get("weight_decay", 1e-4),
+            )
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=config.get("epoch_max", 100), eta_min=1e-6
+            )
+            print("Adam for encoder + classifier CE")
+        else:
+            optimizer, scheduler = create_optimizer_and_scheduler(classifier, config)
     
     # Create save directory
     save_dir = config.get('save_dir', './checkpoints')
@@ -834,7 +866,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             args=args,
             config=config,
         )
-    elif not args.classifier:
+    elif not config["classifier"]:
         trainer = ContrastiveTrainer(
             model=model,
             train_loader=train_loader,
@@ -852,6 +884,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     else:
         use_graph = config.get('graph', False)
         if not use_graph:
+            print("no ce")
             trainer = ConClassTrainer(
                 model=model,
                 encoder_ckpt_path=config["ckpt_path"],
@@ -865,7 +898,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
                 device=device,
                 save_dir=save_dir,
                 log_interval=config.get('log_interval', 50),
-                args=args
+                args=args,
+                config=config
             )
         else:
             trainer = ConClassGraphTrainer(
@@ -897,7 +931,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Train the model
     print(f"\nStarting training...")
-    if not config.get('pretrained_test', False):
+    if (not config.get('pretrained_test', False)) or config["classifier"]:
         history = trainer.train(
             num_epochs=config['epoch_max'],
             early_stopping_patience=config.get('early_stopping_patience', 20)

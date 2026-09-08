@@ -35,7 +35,7 @@ from train import get_multiclass_ct_name, load_config, create_data_loaders, calc
 from contrastive_losses import MultiPosConLoss, SupConLoss
 from util.utils import TwoCropTransform
 
-
+# Modify this to work for the ablation testing.
 use_mask = True # False set to true if you want to include the mask info
 cifar = False
 
@@ -47,6 +47,16 @@ model_dict = {
     'convnextv2_tiny': 768,
     'new_fused': 512,
 }
+
+def use_contrastive_learning(config):
+    return bool(config.get("contrastive", not config.get("classifier", False)))
+
+def use_supervised_ce(config, args=None):
+    return bool(
+        config.get("classifier", False)
+        or not use_contrastive_learning(config)
+        or (args and args.classifier)
+    )
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
     model = ContrastiveModel(
@@ -430,6 +440,10 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"CUDA version: {torch.version.cuda}")
     
+    supervised_ce = use_supervised_ce(config, args)
+    if args.classifier:
+        config["classifier"] = True
+    
     # Create data loaders
     # if (not args.cifar) or (not args.classifier):
     #     test_loader = create_contrastive_data_loaders(config)
@@ -485,7 +499,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         model_name=chosen_model
     )
 
-    if args.classifier:
+    if supervised_ce: # args.classifier
         use_graph = config.get('graph', False)
         if not use_graph:
             classifier = ClassificationHead(**classification_head_kwargs)
@@ -493,11 +507,20 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
             classifier = GATv2ClassificationHead(**classification_head_kwargs)
 
         if config["class_path"] is not None:
-            state_dict = torch.load(config["class_path"], weights_only=False)
+            state_dict = torch.load(config["class_path"], map_location="cpu", weights_only=False)
                         
-            if not config.get("one_chkpt", False):
-                classifier.load_state_dict(state_dict['model_state_dict'])
-                print("Loaded classifier weights from checkpoint")
+            # if not config.get("one_chkpt", False):
+            #     classifier.load_state_dict(state_dict['model_state_dict'])
+            #     print("Loaded classifier weights from checkpoint")
+                
+            if "encoder_state_dict" in state_dict:
+                model.load_state_dict(state_dict["encoder_state_dict"], strict=False)
+
+            if "model_state_dict" in state_dict:
+                classifier.load_state_dict(state_dict["model_state_dict"])
+            else:
+                classifier.load_state_dict(state_dict)
+            print("Loaded classifier weights from checkpoint")
 
     if config.get("one_chkpt", False):
         encoder_state_dict, classifier_state_dict = load_separate_statedicts(state_dict)
@@ -519,16 +542,17 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     
     # Calculate class weights for balanced training
     if args.cifar == False:
-        class_weights = calculate_class_weights(test_loader, config['num_classes'], device)
+        class_weights = None # calculate_class_weights(test_loader, config['num_classes'], device)
     
     # Create loss function with class weights
-    if not args.classifier:
-        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
+    if supervised_ce: # not args.classifier
+        # if args.cifar == False:
+        #     criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+        # else:
+        criterion = nn.CrossEntropyLoss()
     else:
-        if args.cifar == False:
-            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
-        else:
-            criterion = nn.CrossEntropyLoss()
+        criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07 25 1
+
     
     # Create optimizer and scheduler
     if not args.classifier:

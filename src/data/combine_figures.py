@@ -170,7 +170,7 @@ def add_panel_label(ax: plt.Axes, label: str) -> None:
     ax.text(
         0.0,
         1.02,
-        label,
+        f"({label})",
         transform=ax.transAxes,
         ha="left",
         va="bottom",
@@ -227,10 +227,14 @@ def main() -> None:
             ax.set_facecolor(args.bg)
 
     fig.subplots_adjust(
-        left=0.02,
-        right=0.98,
-        bottom=0.02,
-        top=0.96,
+        # left=0.02,
+        # right=0.98,
+        # bottom=0.02,
+        # top=0.96,
+        left=0.005,
+        right=0.75, # 995
+        bottom=0.005,
+        top=0.9, # 985
         wspace=args.wspace,
         hspace=args.hspace,
     )

@@ -55,6 +55,9 @@ Examples:
     parser.add_argument('--classifier', action='store_true',
                        help='Enable classifier training')
     
+    parser.add_argument('--no-contrastive', action='store_true',
+                       help='Use single-view cross-entropy training instead of two-view SupCon training')
+    
     # Override configuration parameters
     parser.add_argument('--epochs', type=int, default=None,
                        help='Number of training epochs (overrides config)')
@@ -184,6 +187,11 @@ def update_config_from_args(config_path, args):
         config['aug'] = False
         if args.verbose:
             print("Override: data augmentation disabled")
+            
+    if args.no_contrastive:
+        config['contrastive'] = False
+        if args.verbose:
+            print("Override: contrastive learning disabled")
     
     # Set default save directory if not specified
     if 'save_dir' not in config:
@@ -297,3 +305,4 @@ def main():
 if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)
+    
