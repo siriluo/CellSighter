@@ -74,6 +74,7 @@ class ConClassTrainer:
         self.save_dir = save_dir
         self.log_interval = log_interval
         self.args = args
+        self.config = config or {}
         self.encoder_ckpt = encoder_ckpt_path
         self.classifier = classifier
         self.config = config
@@ -747,7 +748,6 @@ class ConClassTrainer:
             print(f"Training curves saved to {save_path}")
         
         plt.show()
-
 
 
 
