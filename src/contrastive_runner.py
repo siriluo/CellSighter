@@ -21,7 +21,7 @@ sys.path.insert(0, str(src_dir))
 
 # Local imports
 from models import create_model, get_model_info
-from contrastive_learn_add import ClassificationHead2, ContrastiveModel, ProjectionHead, ClassificationHead
+from contrastive_learn_add import ClassificationHead2, ContrastiveModel, ProjectionHead, ClassificationHead, build_resnet50
 from gat_model import GATv2ClassificationHead
 from adversarial_contrastive_trainer import AdversarialContrastiveTrainer
 from contrastive_trainer import ContrastiveTrainer
@@ -57,6 +57,10 @@ def use_supervised_ce(config: Dict[str, Any], args=None) -> bool:
     return config.get("classifier", False) or not use_contrastive_learning(config) or (args and args.classifier)
 
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
+    if model_type == 'resnet':
+        model = build_resnet50(pretrained=False)
+        return model
+    
     model = ContrastiveModel(
         base_model=model_type,
         encoder_kwargs=encoder_kwargs,
@@ -91,7 +95,7 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         optimizer = optim.Adam(
             model.parameters(),
             lr=config['lr'],
-            weight_decay=config.get('weight_decay', 1e-4) #  1e-5
+            weight_decay=config.get('weight_decay', 1e-5) #  1e-5
         )
         print("Adam")
     else:
@@ -103,7 +107,7 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
         optimizer = optim.Adam(
             [p for p in model.parameters() if p.requires_grad],
             lr=config['lr'],
-            weight_decay=config.get('weight_decay', 1e-4) #  1e-5
+            weight_decay=config.get('weight_decay', 1e-5) #  1e-5
         )
         print("Adam")
         

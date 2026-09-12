@@ -240,23 +240,26 @@ class ConClassEvaluator:
         # state_dict = ckpt['model_state_dict'] 
         state_dict = None
         if checkpoint_path:
-            ckpt = torch.load(checkpoint_path, map_location="cpu")
+            ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             state_dict = ckpt.get("model_state_dict", ckpt)
 
         if torch.cuda.is_available():
-            if torch.cuda.device_count() > 1:
-                model_to_load.encoder = torch.nn.DataParallel(model_to_load.encoder)
-            else:
-                new_state_dict = {}
-                for k, v in state_dict.items():
-                    k = k.replace("module.", "")
-                    new_state_dict[k] = v
-                state_dict = new_state_dict
             model_to_load = model_to_load.cuda()
             classifier = classifier.cuda()
             criterion = criterion.cuda()
             cudnn.benchmark = True
             print(f"Loading model from {checkpoint_path}")
+            
+            if torch.cuda.device_count() > 1:
+                model_to_load.encoder = torch.nn.DataParallel(model_to_load.encoder)
+            else:
+                if state_dict is not None:
+                    new_state_dict = {}
+                    for k, v in state_dict.items():
+                        k = k.replace("module.", "")
+                        new_state_dict[k] = v
+                    state_dict = new_state_dict
+
             if state_dict is not None:
                 model_to_load.load_state_dict(state_dict)
         else:

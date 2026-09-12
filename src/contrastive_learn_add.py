@@ -231,7 +231,34 @@ class SupConViT(nn.Module):
         return feat
   
   
+def build_resnet50(num_classes=10, in_channels=3, pretrained=True):
+    weights = models.ResNet50_Weights.DEFAULT if pretrained else None
+    model = models.resnet50(weights=weights)
 
+    # Optional support for RGB + two mask channels.
+    # if in_channels != 3:
+    #     old_conv = model.conv1
+    #     new_conv = nn.Conv2d(
+    #         in_channels,
+    #         old_conv.out_channels,
+    #         kernel_size=old_conv.kernel_size,
+    #         stride=old_conv.stride,
+    #         padding=old_conv.padding,
+    #         bias=False,
+    #     )
+
+    #     with torch.no_grad():
+    #         new_conv.weight[:, :3] = old_conv.weight
+
+    #         if in_channels > 3:
+    #             extra = in_channels - 3
+    #             mean_weight = old_conv.weight.mean(dim=1, keepdim=True)
+    #             new_conv.weight[:, 3:] = mean_weight.repeat(1, extra, 1, 1)
+
+    #     model.conv1 = new_conv
+
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    return model
   
   
 class MaskBranch(nn.Module):

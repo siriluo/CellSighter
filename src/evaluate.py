@@ -470,8 +470,8 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     print(f"Input channels: {input_channels}")
     
     # Create model
-    # create_contrastive_model
-    chosen_model = 'new_fused' # 'convnextv2_tiny' resnet18 resnet50 resnet34
+    # create_contrastive_model 
+    chosen_model = 'resnet50' # 'convnextv2_tiny' resnet18 resnet50 resnet34 new_fused
     encoder_kwargs = {
         'in_channel': input_channels, # 2*
         # 'num_classes': config['num_classes'],
@@ -495,7 +495,7 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
         encoder_kwargs=encoder_kwargs,
         projection_head_kwargs=projection_head_kwargs,
         classification_head_kwargs=classification_head_kwargs,
-        model_type='new_fused', # new_fused resnet
+        model_type='resnet', # new_fused resnet
         model_name=chosen_model
     )
 

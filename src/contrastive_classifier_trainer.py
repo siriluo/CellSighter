@@ -253,6 +253,165 @@ class ConClassTrainer:
         return model_to_load, classifier, criterion #
 
 
+    def train_basic_epoch(self, train_loader, encoder_model, criterion, optimizer, epoch): # , opt
+        """one epoch training"""
+        # encoder_model.eval()
+        encoder_model.train()
+
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+
+        end = time.time()
+        for idx, batch in enumerate(train_loader):
+        # for idx, (images, labels) in enumerate(train_loader):
+            data_time.update(time.time() - end)
+
+            if self.args.cifar == False:
+                images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                labels = batch['label'] #.to(self.device) [1]
+            else:
+                images = batch[0]
+                labels = batch[1]
+
+            # Code to append mask dimensions
+            # for images[0] and images[1], append m[0] and m[1] respectively along channel dimension
+            if self.args.cifar == False:
+                m = batch.get('mask', None)
+                if m is not None:
+                    images = torch.cat([images, m], dim=1)
+
+            images = images.cuda(non_blocking=True)
+            labels = labels.cuda(non_blocking=True)
+
+            # warm-up learning rate
+            optimizer.zero_grad(set_to_none=True)
+
+            logits = encoder_model(images)
+            loss = criterion(logits, labels)
+
+            loss.backward()
+            optimizer.step()
+            
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            # print info
+            if (idx + 1) % self.log_interval == 0:
+                print('Train: [{0}][{1}/{2}]\t'
+                    'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                    'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                    'loss {loss.val:.3f} ({loss.avg:.3f})'.format(
+                    epoch, idx + 1, len(train_loader), batch_time=batch_time,
+                    data_time=data_time, loss=losses))
+                sys.stdout.flush()
+
+        return losses.avg
+
+
+    def basic_validate(self) -> Dict[str, float]:
+        """
+        Validate the model on validation set.
+        
+        Returns:
+            Dictionary with validation metrics
+        """
+        self.encoder_model.eval()
+        self.classifier.eval()
+        
+        all_preds = []
+        all_labels = []
+        all_probs = []
+        # all_probs_test = []
+
+        losses = AverageMeter()
+        
+        with torch.no_grad():
+            for idx, batch in enumerate(self.val_loader):
+                if self.args.cifar == False:
+                    images = batch['image'] # .to(self.device) [2, B, C, H, W] [0]
+                    labels = batch['label'] #.to(self.device) [1]
+                else:
+                    images = batch[0]
+                    labels = batch[1]
+                
+                if self.args.cifar == False:
+                    m = batch.get('mask', None)
+                    if m is not None:
+                        images = torch.cat([images, m], dim=1)
+
+                images = images.cuda(non_blocking=True)
+                labels = labels.cuda(non_blocking=True)
+                bsz = labels.shape[0]
+
+                # compute loss
+                output = self.encoder_model(images)
+                loss = self.criterion(output, labels)
+                
+                # Get predictions and probabilities
+                probs = torch.softmax(output, dim=1)
+
+                if self.num_classes > 2:
+                    preds = probs.argmax(1)
+                else:
+                    _, preds = torch.max(output, 1)
+                
+                # Collect results
+                # running_loss += loss.item() * images.size(0)
+                losses.update(loss.item(), bsz)
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+                if self.num_classes <= 2:
+                    all_probs.extend(probs[:, 1].cpu().numpy())  # Probability of tumor class
+                else:
+                    all_probs.append(probs.cpu().numpy())
+        
+        # Calculate metrics
+        avg_loss = losses.avg # running_loss / len(self.val_loader.dataset)
+        accuracy = accuracy_score(all_labels, all_preds)
+
+        if self.num_classes <= 2:
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                all_labels, all_preds, average='binary', zero_division=0
+            )
+        else:
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                all_labels, all_preds, average='weighted', zero_division=0
+            )
+            
+        # Calculate AUC if we have both classes
+        try:
+            if self.num_classes <= 2:
+                auc = roc_auc_score(all_labels, all_probs)
+            else:
+                all_probs = np.vstack(all_probs)
+
+                auc = roc_auc_score(all_labels, all_probs, multi_class='ovo', average='weighted')
+                multi_aucs = roc_auc_score(all_labels, all_probs, multi_class='ovr', average=None)
+                
+        except ValueError as e:
+            auc = 0.0  # Handle case where only one class is present
+            if self.num_classes > 2:
+                multi_aucs = []
+            # raise 
+        
+        metrics = {
+            'loss': avg_loss,
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
+            'auc': auc
+        }
+
+        if self.num_classes > 2:
+            multi_aucs_list = multi_aucs.tolist()
+            metrics.update({'multi_aucs': multi_aucs_list})
+        
+        return metrics
+
+
     def train_epoch(self, train_loader, encoder_model, classifier, criterion, optimizer, epoch): # , opt
         """one epoch training"""
         # encoder_model.eval()
@@ -467,10 +626,16 @@ class ConClassTrainer:
             adjust_learning_rate(self.args, self.optimizer, epoch)
             
             # Training
-            train_loss = self.train_epoch(self.train_loader, self.encoder_model, self.classifier, self.criterion, self.optimizer, epoch + 1) # , train_acc 
+            if self.config.get("basic", False):
+                train_loss = self.train_basic_epoch(self.train_loader, self.encoder_model, self.criterion, self.optimizer, epoch + 1)
+            else:
+                train_loss = self.train_epoch(self.train_loader, self.encoder_model, self.classifier, self.criterion, self.optimizer, epoch + 1) # , train_acc 
             
             # Validation
-            val_metrics = self.validate()
+            if self.config.get("basic", False):
+                val_metrics = self.basic_validate()
+            else:
+                val_metrics = self.validate()
             
             # Update learning rate
             
@@ -585,9 +750,12 @@ class ConClassTrainer:
                 bsz = labels.shape[0]
 
                 # compute loss
-                with torch.no_grad():
-                    features = self.encoder_model.encoder(images)
-                output = self.classifier(features.detach())
+                if self.config.get("basic", False):
+                    output = self.encoder_model(images)
+                else:
+                    with torch.no_grad():
+                        features = self.encoder_model.encoder(images)
+                    output = self.classifier(features.detach())
                 loss = self.criterion(output, labels)
                 
                 # Get predictions and probabilities
