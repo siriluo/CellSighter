@@ -59,17 +59,16 @@ def use_supervised_ce(config: Dict[str, Any], args=None) -> bool:
 def create_contrastive_model(encoder_kwargs, projection_head_kwargs, classification_head_kwargs, model_type: str = 'resnet', model_name: str = 'resnet18') -> nn.Module:
     if model_type == 'resnet':
         model = build_resnet50(pretrained=False)
-        return model
-    
-    model = ContrastiveModel(
-        base_model=model_type,
-        encoder_kwargs=encoder_kwargs,
-        projection_head_kwargs=projection_head_kwargs,
-        classification_head_kwargs=classification_head_kwargs,
-        norm_proj_head_input=False,
-        model_name=model_name,
-        pretrained=True
-    )
+    else:
+        model = ContrastiveModel(
+            base_model=model_type,
+            encoder_kwargs=encoder_kwargs,
+            projection_head_kwargs=projection_head_kwargs,
+            classification_head_kwargs=classification_head_kwargs,
+            norm_proj_head_input=False,
+            model_name=model_name,
+            pretrained=True
+        )
 
     return model
 
@@ -87,29 +86,29 @@ def create_optimizer_and_scheduler(model: nn.Module, config: Dict[str, Any]) -> 
     # else:
 
     if config['classifier']:
-        # optimizer = optim.SGD(model.parameters(),
-        #                 lr=config['lr'],
-        #                 momentum=0.9,
-        #                 weight_decay=1e-4)
-        # print("SGD")
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=config['lr'],
-            weight_decay=config.get('weight_decay', 1e-5) #  1e-5
-        )
-        print("Adam")
+        optimizer = optim.SGD(model.parameters(),
+                        lr=config['lr'],
+                        momentum=0.9,
+                        weight_decay=1e-5)
+        print("SGD")
+        # optimizer = optim.Adam(
+        #     model.parameters(),
+        #     lr=config['lr'],
+        #     weight_decay=config.get('weight_decay', 1e-5) #  1e-5
+        # )
+        # print("Adam")
     else:
-        # optimizer = optim.SGD(model.parameters(),
-        #         lr=config['lr'],
-        #         momentum=0.9,
-        #         weight_decay=1e-4)
-        # print("SGD with different LRs")
-        optimizer = optim.Adam(
-            [p for p in model.parameters() if p.requires_grad],
-            lr=config['lr'],
-            weight_decay=config.get('weight_decay', 1e-5) #  1e-5
-        )
-        print("Adam")
+        optimizer = optim.SGD(model.parameters(),
+                lr=config['lr'],
+                momentum=0.9,
+                weight_decay=1e-4)
+        print("SGD with different LRs")
+        # optimizer = optim.Adam(
+        #     [p for p in model.parameters() if p.requires_grad],
+        #     lr=config['lr'],
+        #     weight_decay=config.get('weight_decay', 1e-5) #  1e-5
+        # )
+        # print("Adam")
         
     # if config.get('pretrained_test', False):
     #     optimizer = build_optimizer_stage1(
@@ -800,10 +799,13 @@ def main(config_path: str, model_type: str = 'cnn', resume_checkpoint: str = Non
     if not config["classifier"]:
         criterion = SupConLoss(temperature=0.15) # try default 0.07 #  temperature=0.07, 0.1, 0.13, 0.15, 0.2 25 
     else:
-        if args.cifar == False:
-            criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+        if config["basic"]:
+            criterion = None
         else:
-            criterion = nn.CrossEntropyLoss()
+            if args.cifar == False:
+                criterion = nn.CrossEntropyLoss(weight=class_weights) # 
+            else:
+                criterion = nn.CrossEntropyLoss()
     
     # Create optimizer and scheduler
     domain_discriminator = None

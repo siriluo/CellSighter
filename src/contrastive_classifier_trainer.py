@@ -230,12 +230,14 @@ class ConClassTrainer:
             # else:
 
             model_to_load = model_to_load.cuda()
-            classifier = classifier.cuda()
+            if classifier is not None:
+                classifier = classifier.cuda()
             criterion = criterion.cuda()
             cudnn.benchmark = True
         else:
             model_to_load = model_to_load.to(self.device)
-            classifier = classifier.to(self.device)
+            if classifier is not None:
+                classifier = classifier.to(self.device)
             criterion = criterion.to(self.device)
             
         if state_dict is not None:
